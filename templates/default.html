@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{# Default layout — text-and-image. Renders the Markdown body as-is. #}
+{# `body` is the markdown-rendered HTML; `| safe` is required so Jinja #}
+{# does not double-escape the HTML tags it contains. #}
+
+{% block content %}
+{{ body | safe }}
+{% endblock %}

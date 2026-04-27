@@ -31,10 +31,36 @@ from pathlib import Path
 
 import markdown as md
 import yaml
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import TemplateNotFound
 
 GRAPH_USERS_BATCH_SIZE = 999
 SEND_PAUSE_SECONDS = 0.5  # gentle pacing under the 100/min ACS cap
 HMAC_PURPOSE = "unsubscribe"
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TEMPLATES_DIR = REPO_ROOT / "templates"
+
+# `body` and `unsubscribe_url` are the rendering context's reserved keys —
+# frontmatter cannot override them.
+RESERVED_TEMPLATE_KEYS = frozenset({"body", "unsubscribe_url"})
+
+_jinja_env: Environment | None = None
+
+
+def _get_jinja_env() -> Environment:
+    """Lazy-init Jinja env so import doesn't fail before templates exist."""
+    global _jinja_env
+    if _jinja_env is None:
+        if not TEMPLATES_DIR.is_dir():
+            sys.exit(f"ERROR: templates directory not found at {TEMPLATES_DIR}")
+        _jinja_env = Environment(
+            loader=FileSystemLoader(str(TEMPLATES_DIR)),
+            autoescape=select_autoescape(["html"]),
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
+    return _jinja_env
 
 
 def env(name: str, *, required: bool = True, default: str = "") -> str:
@@ -89,42 +115,22 @@ def rewrite_images(html: str, repo: str, ref: str) -> str:
 
 
 def build_email_html(rendered_body: str, fm: dict, unsubscribe_url: str) -> str:
-    preheader = (
-        (fm.get("preheader") or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
+    template_name = (fm.get("template") or "default") + ".html"
+    try:
+        template = _get_jinja_env().get_template(template_name)
+    except TemplateNotFound:
+        sys.exit(
+            f"ERROR: template '{template_name}' not found in {TEMPLATES_DIR}. "
+            f"Either add it or omit `template` in the broadcast frontmatter."
+        )
+    # Frontmatter values fill the rest of the rendering context. Reserved keys
+    # (body, unsubscribe_url) come from the renderer, not the author.
+    context = {k: v for k, v in fm.items() if k not in RESERVED_TEMPLATE_KEYS}
+    return template.render(
+        body=rendered_body,
+        unsubscribe_url=unsubscribe_url,
+        **context,
     )
-    subject = (
-        fm.get("subject", "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-    return f"""<!doctype html>
-<html lang="nl">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{subject}</title>
-</head>
-<body style="margin:0;padding:0;background:#f6f8fa;font-family:-apple-system,Segoe UI,sans-serif;color:#222;">
-  <span style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">{preheader}</span>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f8fa;padding:24px 0;">
-    <tr><td align="center">
-      <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#fff;border-radius:8px;padding:32px;">
-        <tr><td style="line-height:1.55;font-size:16px;">
-          {rendered_body}
-        </td></tr>
-        <tr><td style="border-top:1px solid #e5e7eb;padding-top:16px;font-size:12px;color:#6b7280;">
-          Je ontvangt deze e-mail omdat je je hebt aangemeld voor updates van L-GEVITY.
-          <a href="{unsubscribe_url}" style="color:#6b7280;text-decoration:underline;">Afmelden</a>.
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>"""
 
 
 def build_plain_text(fm: dict, body_md: str, unsubscribe_url: str) -> str:

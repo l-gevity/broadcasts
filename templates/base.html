@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="nl">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <title>{{ subject }}</title>
+    </head>
+    <body
+        style="margin:0;padding:0;background:#f6f8fa;font-family:-apple-system,Segoe UI,sans-serif;color:#222;"
+    >
+        <span
+            style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;"
+            >{{ preheader | default('') }}</span
+        >
+        <table
+            role="presentation"
+            width="100%"
+            cellspacing="0"
+            cellpadding="0"
+            style="background:#f6f8fa;padding:24px 0;"
+        >
+            <tr>
+                <td align="center">
+                    <table
+                        role="presentation"
+                        width="600"
+                        cellspacing="0"
+                        cellpadding="0"
+                        style="max-width:600px;width:100%;background:#fff;border-radius:8px;padding:32px;"
+                    >
+                        {% block header %}{% endblock %}
+                        <tr>
+                            <td style="line-height:1.55;font-size:16px;">
+                                {% block content %}{% endblock %}
+                            </td>
+                        </tr>
+                        {% include "partials/footer.html" %}
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+</html>

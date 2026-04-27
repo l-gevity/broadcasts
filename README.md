@@ -38,6 +38,38 @@ the jsDelivr CDN at send time, so they render in mail clients without a
 hosting dependency.
 ```
 
+## Templates
+
+Email layouts live in `templates/*.html` and use
+[Jinja2](https://jinja.palletsprojects.com/) syntax.
+
+- `templates/base.html` — outer shell (head, viewport, table wrapper, footer
+  slot). Defines empty `{% block header %}` and `{% block content %}` for
+  child templates to override.
+- `templates/default.html` — extends `base.html`, fills `content` with the
+  rendered Markdown body. Used when broadcast frontmatter has no `template`
+  key.
+- `templates/partials/footer.html` — legal text + unsubscribe link, included
+  by `base.html`.
+
+To use a different layout per broadcast, set `template` in frontmatter:
+
+```yaml
+---
+template: announcement
+subject: ...
+---
+```
+
+If `template` is omitted, `default.html` is used. All other frontmatter keys
+are passed to the template as variables — author once in YAML, reference as
+`{{ key }}` in the template. `body` and `unsubscribe_url` are reserved keys
+filled by the renderer; they cannot be overridden by frontmatter.
+
+To add a layout, drop a new file in `templates/` (typically `{% extends
+"base.html" %}`) and reference it by name (without the `.html`) in
+frontmatter.
+
 ## Workflow
 
 `.github/workflows/send-broadcast.yml` runs on push to `main` for newly added
