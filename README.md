@@ -73,21 +73,28 @@ frontmatter.
 ## Workflow
 
 `.github/workflows/send-broadcast.yml` runs on push to `main` for newly added
-files in `broadcasts/`. Currently ships with `DRY_RUN: 'true'` hardcoded —
-flip the env var via PR review to go live.
+files in `broadcasts/`. Ships with `DRY_RUN: 'false'` (live). To temporarily
+disable sends (e.g. while validating a new template), flip the env var via
+PR review.
 
 `.github/scripts/send_broadcast.py` does the rendering, recipient lookup,
 HMAC unsubscribe URL generation, and ACS REST send.
 
-See
+For the rationale behind every design choice (auth pattern, consent model,
+templating engine, etc.), see [DECISIONS.md](./DECISIONS.md).
+
+For the as-built infrastructure topology, see
 [INFRASTRUCTURE.md](https://github.com/l-gevity/l-gevity/blob/develop/INFRASTRUCTURE.md)
-in the main repo for the full architecture and
-[issue #333](https://github.com/l-gevity/l-gevity/issues/333) for the design
-rationale.
+in the main repo. For the original design discussion, see
+[issue #333](https://github.com/l-gevity/l-gevity/issues/333).
 
 ## Unsubscribe
 
-Every email contains a one-click unsubscribe link in the footer (and the
-RFC 8058 `List-Unsubscribe` header). Clicking it clears `marketingOptInAt`
-for that recipient on the CIAM tenant and prevents future sends. The link is
-HMAC-signed and stateless — no token table to maintain.
+Every email contains an unsubscribe link in the footer. Clicking it clears
+`marketingOptInAt` for that recipient on the CIAM tenant and prevents future
+sends. The link is HMAC-signed and stateless — no token table to maintain.
+
+The RFC 8058 `List-Unsubscribe` header (the "one-click" button some inbox
+providers show next to the sender name) is **not** sent: ACS Email's header
+allowlist rejects it. Footer link only — see
+[DECISIONS.md § No List-Unsubscribe headers](./DECISIONS.md#no-list-unsubscribe--rfc-8058-headers).
