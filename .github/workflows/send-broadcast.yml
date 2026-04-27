@@ -123,27 +123,18 @@ jobs:
                   echo "::add-mask::$TOKEN"
                   echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
-            - name: Resolve b2c-extensions-app ID
-              if: steps.detect.outputs.files != ''
-              id: ext
-              env:
-                  GRAPH_TOKEN: ${{ steps.graph.outputs.token }}
-              run: |
-                  APPS=$(curl -s -H "Authorization: Bearer ${GRAPH_TOKEN}" \
-                    "https://graph.microsoft.com/v1.0/applications")
-                  EXT_APP_ID=$(echo "$APPS" | jq -r '.value[] | select(.displayName | startswith("b2c-extensions-app")) | .appId' | tr -d '-')
-                  if [ -z "$EXT_APP_ID" ] || [ "$EXT_APP_ID" = "null" ]; then
-                    echo "ERROR: Could not find b2c-extensions-app — required for the marketingOptInAt extension attribute name resolution"
-                    exit 1
-                  fi
-                  echo "ext_app_id=$EXT_APP_ID" >> $GITHUB_OUTPUT
+            # NB: EXT_APP_ID is the b2c-extensions-app's appId with hyphens
+            # stripped (e.g. 53a44465e31f486f8d3fbe9654eb09b4) — used to build
+            # the extension property name `extension_<appId>_marketingOptInAt`.
+            # Stored as a repo variable rather than queried at runtime so the
+            # CIAM SP doesn't need Application.Read.All permission.
 
             - name: Send broadcasts
               if: steps.detect.outputs.files != ''
               env:
                   GRAPH_TOKEN: ${{ steps.graph.outputs.token }}
                   ACS_TOKEN: ${{ steps.acs.outputs.token }}
-                  EXT_APP_ID: ${{ steps.ext.outputs.ext_app_id }}
+                  EXT_APP_ID: ${{ vars.EXT_APP_ID }}
                   USER_HMAC_KEY: ${{ secrets.USER_HMAC_KEY }}
                   ACS_ENDPOINT: ${{ vars.ACS_ENDPOINT }}
                   SENDER_ADDRESS: ${{ vars.SENDER_ADDRESS }}
