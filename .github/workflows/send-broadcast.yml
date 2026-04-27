@@ -133,11 +133,13 @@ jobs:
                   GRAPH_TOKEN: ${{ steps.graph.outputs.token }}
                   ACS_TOKEN: ${{ steps.acs.outputs.token }}
                   EXT_APP_ID: ${{ vars.EXT_APP_ID }}
-                  USER_HMAC_KEY: ${{ secrets.USER_HMAC_KEY }}
                   ACS_ENDPOINT: ${{ vars.ACS_ENDPOINT }}
                   SENDER_ADDRESS: ${{ vars.SENDER_ADDRESS }}
                   REPLY_TO_ADDRESS: ${{ vars.REPLY_TO_ADDRESS }}
-                  UNSUBSCRIBE_BASE_URL: ${{ vars.UNSUBSCRIBE_BASE_URL }}
+                  # Full URL of the profile page where opted-in members can
+                  # toggle off marketing consent (e.g. https://l-gevity.nl/profile.html#marketing).
+                  # Same value for every recipient — that's what enables BCC batching.
+                  UNSUBSCRIBE_URL: ${{ vars.UNSUBSCRIBE_URL }}
                   REPO_FULL_NAME: ${{ github.repository }}
                   REF: ${{ github.ref_name }}
                   FILES: ${{ steps.detect.outputs.files }}

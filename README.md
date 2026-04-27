@@ -78,7 +78,7 @@ disable sends (e.g. while validating a new template), flip the env var via
 PR review.
 
 `.github/scripts/send_broadcast.py` does the rendering, recipient lookup,
-HMAC unsubscribe URL generation, and ACS REST send.
+and ACS REST send (BCC-batched, up to 50 recipients per call).
 
 For the rationale behind every design choice (auth pattern, consent model,
 templating engine, etc.), see [DECISIONS.md](./DECISIONS.md).
@@ -90,9 +90,19 @@ in the main repo. For the original design discussion, see
 
 ## Unsubscribe
 
-Every email contains an unsubscribe link in the footer. Clicking it clears
-`marketingOptInAt` for that recipient on the CIAM tenant and prevents future
-sends. The link is HMAC-signed and stateless — no token table to maintain.
+Every email's footer links to the L-GEVITY profile page (`UNSUBSCRIBE_URL`,
+typically `https://l-gevity.nl/profile.html#marketing`). The recipient logs
+in (if not already authenticated) and toggles off the same
+`<l-gevity-marketing-opt-in>` switch they used to opt in. There is no
+per-recipient token, no SWA `/api/unsubscribe` call in the new flow, and no
+`USER_HMAC_KEY` shared between repos.
+
+This is symmetric with the consent surface: opt-in already requires login
+(the profile-page toggle is the only opt-in path), so requiring login to opt
+out satisfies GDPR Recital 32 ("withdrawal as easy as giving"). It also lets
+the broadcast script send the **same body** to every recipient, which is
+what unlocks ACS BCC batching — see
+[DECISIONS.md § Profile-page unsubscribe](./DECISIONS.md#profile-page-unsubscribe-bcc-batching).
 
 The RFC 8058 `List-Unsubscribe` header (the "one-click" button some inbox
 providers show next to the sender name) is **not** sent: ACS Email's header

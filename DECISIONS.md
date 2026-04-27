@@ -158,40 +158,72 @@ members and have no idea who opened what.
 **Revisit if** content effectiveness becomes a bottleneck and the
 GDPR overhead of disclosing tracking is worth the engagement data.
 
-### Stateless HMAC unsubscribe
+### Profile-page unsubscribe (BCC batching)
 
-The unsubscribe link is `https://l-gevity.nl/api/unsubscribe?t=<oid>.<sig>`,
-where `<sig>` is `base64url(HMAC-SHA256(USER_HMAC_KEY, "unsubscribe:" + oid))`
-with padding stripped. The verifier on the SWA recomputes the HMAC and
-compares using `timingSafeEqual`. There is no token table — the entire
-payload is the URL.
+The footer link points to the L-GEVITY profile page
+(`UNSUBSCRIBE_URL`, e.g. `https://l-gevity.nl/profile.html#marketing`).
+Clicking it lands the recipient on the same `<l-gevity-marketing-opt-in>`
+toggle they used to opt in. They authenticate (if not already) and flip it
+off; the existing `PUT /api/profile/marketing-opt-in` endpoint clears
+`marketingOptInAt`. There is no per-recipient token, no
+`/api/unsubscribe` call in the new flow, and no `USER_HMAC_KEY` shared
+between this repo and the main monorepo.
 
-This means:
-- No database write to issue a token (sending is fast).
-- No expiration to manage (a stale token still verifies).
-- Idempotent — link prefetch by mail clients (Gmail, Outlook security
-  scanners) cannot cause harm because clearing an already-cleared
-  attribute is a no-op.
-- Invalidating a leaked link requires rotating `USER_HMAC_KEY`, which
-  invalidates *all* outstanding links. Acceptable.
+The chosen design has three properties that compound:
 
-### Purpose-tagged HMAC inputs
+1. **Symmetric with consent under GDPR Recital 32.** Opt-in is gated
+   behind login (the profile-page toggle is the only opt-in surface — see
+   "Opt-in via profile page only" above). Requiring login to opt out is
+   "as easy as giving consent", since giving consent itself requires
+   login. The asymmetry that GDPR guards against — anonymous one-click
+   opt-in followed by login-gated opt-out — is structurally absent here.
 
-The HMAC input is `unsubscribe:<oid>`, not just `<oid>`. The
-`unsubscribe:` prefix is a "purpose tag". The same `USER_HMAC_KEY` is
-used elsewhere in the SWA (e.g. for the pseudonym service); the prefix
-guarantees a token valid in one context cannot be replayed against
-another. If the pseudonym service used the same key with prefix
-`pseudonym:`, no leak from one is a leak into the other.
+2. **Same body for every recipient.** The original HMAC scheme baked a
+   per-recipient signature into the `<a href>` in the footer, which made
+   the rendered HTML different for every recipient and forced one ACS
+   call per recipient. With a constant URL the body is identical across
+   the cohort, which lets us put up to 50 recipients in a single
+   `recipients.bcc` array — ACS Email's standard-tier per-call cap. That
+   is the structural win that motivated the redesign; see "BCC-batched
+   send" below.
+
+3. **No shared HMAC key, no SWA endpoint to maintain in two places.**
+   The previous model required `USER_HMAC_KEY` to be present in both
+   `l-gevity/broadcasts` (to mint tokens) and `l-gevity/l-gevity` (to
+   verify them). Rotating it broke every outstanding unsubscribe link
+   in flight. The new model removes this coupling: broadcasts don't
+   need any cryptographic material, and the SWA `/api/unsubscribe`
+   endpoint becomes legacy (kept only to honor old emails sent before
+   the redesign — see "Legacy `/api/unsubscribe` endpoint preserved").
+
+The trade-off is one extra step for the recipient (login on the profile
+page) versus the previous one-click-from-email behavior. At our scale
+and given the symmetric-consent model, this is acceptable.
+
+**Revisit if** the profile-page hop produces a complaint or a
+deliverability signal (e.g. spam-folder reports rise because users
+report-as-spam instead of clicking through to opt out).
+
+### Legacy `/api/unsubscribe` endpoint preserved
+
+Emails sent before the redesign carry HMAC-signed
+`https://l-gevity.nl/api/unsubscribe?t=<oid>.<sig>` URLs in their
+footers. Those emails live in member inboxes indefinitely. Deleting the
+endpoint would break them. The endpoint is therefore retained as-is —
+it still validates the HMAC, clears `marketingOptInAt`, and shows the
+confirmation page — and is marked deprecated in code comments. New
+broadcasts do not generate these URLs and the workflow no longer needs
+`USER_HMAC_KEY`.
 
 ### Consent state read fresh from Graph, not from the ID token
 
 `marketingOptInAt` is deliberately NOT in the optional claims of the ID
 token, even though the other extension attributes
 (`tosAcceptedVersion`, `redeemedPromoCode`, `screenName`) are. The
-unsubscribe endpoint clears the attribute *without a login*, so a
-session token issued before the unsubscribe would carry stale opt-in
-state for up to an hour.
+profile toggle clears or sets the attribute mid-session, and the
+legacy `/api/unsubscribe` endpoint can clear it without a login at
+all, so a session token issued before either of those would carry
+stale opt-in state for up to an hour.
 
 The consequence is one extra Graph call per profile-page render to
 read the current state. At low traffic this is negligible.
@@ -282,11 +314,11 @@ locks can mitigate accidental delete if needed.
 
 ACS Email offers two domain modes:
 - **Azure-managed**: a subdomain of `azurecomm.net` provisioned
-  instantly. Hard-capped at 25 emails/day (Microsoft's anti-abuse
-  measure). For testing only.
+  instantly. Capped at 5 emails/min and 10 emails/hour (no higher
+  limits available). For testing only.
 - **Customer-managed (chosen)**: a subdomain you own, with verified
-  SPF + DKIM + DMARC DNS records. Standard ACS limits apply
-  (~100 emails/minute). Suitable for production.
+  SPF + DKIM + DMARC DNS records. Initial default rate limits apply
+  (see "Rate limits and BCC batching" below). Suitable for production.
 
 We use `mail.l-gevity.nl` rather than the apex `l-gevity.nl` because
 sending from a dedicated subdomain isolates broadcast reputation from
@@ -415,18 +447,54 @@ needs auth-gated images (which would require a real CDN).
 
 ## Sending mechanics
 
-### Per-recipient send, not batched
+### BCC-batched send
 
-ACS Email accepts multiple recipients per request (in the `to` /
-`cc` / `bcc` arrays), but every recipient in a batched request shares
-the same body. Our footer link contains a per-recipient HMAC over
-their OID, so batching is incompatible — we'd either need to use
-`bcc` (which still shares the URL) or rewrite the body per recipient
-(which is what one-per-call does).
+The footer URL is a constant (the profile page) — every recipient sees
+the same body. That makes ACS BCC batching legal: we put up to 50
+recipients in `recipients.bcc` per `/emails:send` call. 50 is a hard
+cap from
+[the documented size limits for email](https://learn.microsoft.com/en-us/azure/communication-services/concepts/service-limits#size-limits-for-email)
+("Number of recipients in email: 50", combined across to/cc/bcc); going
+higher requires an Azure Support request to lift it. `to` is omitted;
+ACS allows BCC-only sends and recipients don't see each other's
+addresses.
 
-One ACS REST call per recipient, paced 0.5s apart, keeps us well
-under the 100/minute cap. At 74 members the total send is ~37s. At
-ten times that scale it's still under 7 minutes.
+The previous design sent one ACS call per recipient because the
+footer link contained a per-recipient HMAC token, forcing per-recipient
+body. That coupling is gone — see "Profile-page unsubscribe (BCC
+batching)" above.
+
+### Rate limits and pacing
+
+ACS Email enforces two per-subscription rate limits on custom domains
+(per
+[the documented send-email rate limits](https://learn.microsoft.com/en-us/azure/communication-services/concepts/service-limits#rate-limits-for-email)):
+
+| Window | Default cap | Higher limits available |
+| --- | --- | --- |
+| 1 minute | 30 emails | Yes (via support request) |
+| 60 minutes | 100 emails | Yes (via support request) |
+
+The cap counts **recipients**, not API calls. A BCC batch of 50 burns
+50 of the per-minute and per-hour budget. The 60-minute cap is the one
+that bites first on a multi-hundred-member broadcast: at 74 members in
+a single send the 100/hour cap is the binding constraint until a
+quota increase is requested.
+
+We pause `SEND_PAUSE_SECONDS` (0.5s) between batches to avoid
+back-to-back 30/min bursts and let ACS's internal pacer smooth the
+flow. With 1 recipient per send the pacing is irrelevant; with 50 it
+keeps us comfortably under 30/min.
+
+**Revisit if** the broadcast cadence or membership grows past the
+default 100/hour. Quota increases are documented in
+[Quota increase for email domains](https://learn.microsoft.com/en-us/azure/communication-services/concepts/email/email-quota-increase)
+and require a custom domain (which we have) plus a sub-1% failure
+rate.
+
+The earlier draft of this section quoted "~100 emails/minute". That
+was wrong: 100 is the per-hour cap, not per-minute. The error was
+caught while sizing the BCC batching change.
 
 ### Exponential backoff on HTTP 429 with `Retry-After` honored
 
@@ -501,9 +569,9 @@ newly-added-files filter. This is useful for:
 - `gh-broadcasts-graph` (CIAM, client secret): 2-year expiry. Rotate
   via `az ad app credential reset --id <appId>`, then update
   `CIAM_CLIENT_SECRET` repo secret.
-- `USER_HMAC_KEY`: do not rotate casually — every outstanding
-  unsubscribe link signed with the old key becomes invalid. Rotate
-  only on suspected key compromise, and accept the trade-off that
-  members who clicked an unsubscribe link from an old broadcast may
-  see "invalid link". They can still unsubscribe via the profile
-  page.
+- `USER_HMAC_KEY`: not used by this repo any more (the unsubscribe URL
+  is the profile-page link, no signing required). The key still lives
+  on the SWA so the legacy `/api/unsubscribe` endpoint can verify
+  tokens in old emails — see "Legacy `/api/unsubscribe` endpoint
+  preserved" above. Rotation there breaks any old footer link still
+  out in member inboxes; rotate only on suspected compromise.

@@ -2,23 +2,20 @@
 """Render and send a broadcast via Azure Communication Services Email.
 
 All configuration comes from env vars set by the workflow:
-  DRY_RUN, GRAPH_TOKEN, ACS_TOKEN, EXT_APP_ID, USER_HMAC_KEY,
-  ACS_ENDPOINT, SENDER_ADDRESS, REPLY_TO_ADDRESS, UNSUBSCRIBE_BASE_URL,
+  DRY_RUN, GRAPH_TOKEN, ACS_TOKEN, EXT_APP_ID,
+  ACS_ENDPOINT, SENDER_ADDRESS, REPLY_TO_ADDRESS, UNSUBSCRIBE_URL,
   REPO_FULL_NAME, REF, FILES (newline-separated paths)
 
-The HMAC scheme MUST match packages/api/unsubscribe/index.ts in
-l-gevity/l-gevity:
-  key = base64-decoded USER_HMAC_KEY
-  hmac_input = "unsubscribe:" + oid
-  signature = base64url(HMAC-SHA256(key, hmac_input)).rstrip("=")
-  token = oid + "." + signature
+Unsubscribe model: the footer link points to the profile page
+(`UNSUBSCRIBE_URL`, e.g. https://l-gevity.nl/profile.html#marketing). Opt-in
+already requires login (the profile-page toggle is the only opt-in surface),
+so requiring login to opt out is symmetric with consent under GDPR Recital 32.
+The same URL is used for every recipient, which is what enables BCC batching
+below.
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
 import os
 import re
@@ -35,8 +32,14 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from jinja2 import TemplateNotFound
 
 GRAPH_USERS_BATCH_SIZE = 999
-SEND_PAUSE_SECONDS = 0.5  # gentle pacing under the 100/min ACS cap
-HMAC_PURPOSE = "unsubscribe"
+# ACS Email standard-tier limit is 50 recipients (to+cc+bcc combined) per
+# /emails:send request. We use only BCC, so the cap is 50 per batch.
+BCC_BATCH_SIZE = 50
+# ACS rate limits (custom-domain default): 30 emails/min, 100 emails/hour
+# per subscription, counted by recipient. Pause between batches keeps a 50-BCC
+# burst from front-loading the per-minute window. See DECISIONS.md §
+# "Rate limits and pacing".
+SEND_PAUSE_SECONDS = 0.5
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = REPO_ROOT / "templates"
@@ -68,22 +71,6 @@ def env(name: str, *, required: bool = True, default: str = "") -> str:
     if required and not val:
         sys.exit(f"ERROR: required env var {name} is not set")
     return val
-
-
-def hmac_unsubscribe_url(oid: str, key_b64: str, base_url: str) -> str:
-    try:
-        key = base64.b64decode(key_b64, validate=True)
-    except (ValueError, base64.binascii.Error) as e:
-        sys.exit(
-            f"ERROR: USER_HMAC_KEY is not valid base64 ({e}). "
-            "It must match the value used by the SWA /api/unsubscribe endpoint."
-        )
-    sig_bytes = hmac.new(
-        key, f"{HMAC_PURPOSE}:{oid}".encode("utf-8"), hashlib.sha256
-    ).digest()
-    sig = base64.urlsafe_b64encode(sig_bytes).decode().rstrip("=")
-    token = f"{oid}.{sig}"
-    return f"{base_url}?t={urllib.parse.quote(token, safe='.')}"
 
 
 def parse_broadcast(path: Path) -> tuple[dict, str]:
@@ -207,26 +194,28 @@ def send_one(
     raise RuntimeError("ACS send: exhausted retries")
 
 
+def chunked(seq: list, size: int):
+    """Yield successive `size`-sized chunks from `seq`."""
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
 def main() -> None:
     dry_run = env("DRY_RUN").lower() == "true"
     graph_token = env("GRAPH_TOKEN")
     acs_token = env("ACS_TOKEN")
     ext_app_id = env("EXT_APP_ID")
-    user_hmac_key = env("USER_HMAC_KEY")
     acs_endpoint = env("ACS_ENDPOINT")
     sender_address = env("SENDER_ADDRESS")
     reply_to = env("REPLY_TO_ADDRESS")
-    unsubscribe_base = env("UNSUBSCRIBE_BASE_URL")
+    unsubscribe_url = env("UNSUBSCRIBE_URL")
     repo = env("REPO_FULL_NAME")
     ref = env("REF")
     files = [f.strip() for f in env("FILES").splitlines() if f.strip()]
 
-    # Fail fast if USER_HMAC_KEY is malformed — easier to diagnose at startup
-    # than per-recipient.
-    hmac_unsubscribe_url("0" * 36, user_hmac_key, unsubscribe_base)
-
     print(f"DRY_RUN: {dry_run}")
     print(f"Files to process: {files}")
+    print(f"Unsubscribe URL: {unsubscribe_url}")
 
     print("Fetching recipients from Microsoft Graph...")
     recipients = fetch_recipients(graph_token, ext_app_id)
@@ -245,40 +234,52 @@ def main() -> None:
         rendered_body = rewrite_images(rendered_body, repo, ref)
         subject = fm["subject"]
 
-        last_html = ""
-        for recipient in recipients:
-            unsubscribe_url = hmac_unsubscribe_url(
-                recipient["oid"], user_hmac_key, unsubscribe_base
-            )
-            html = build_email_html(rendered_body, fm, unsubscribe_url)
-            text = build_plain_text(fm, body_md, unsubscribe_url)
+        # Body is identical for every recipient — render once, send many.
+        # This is what makes BCC batching legal: ACS rejects per-recipient
+        # body variation in a single send call.
+        html = build_email_html(rendered_body, fm, unsubscribe_url)
+        text = build_plain_text(fm, body_md, unsubscribe_url)
+
+        total = len(recipients)
+        sent = 0
+        for batch in chunked(recipients, BCC_BATCH_SIZE):
             # NB: ACS Email rejects most reserved headers (incl. List-Unsubscribe
             # / RFC 8058 one-click headers) with HTTP 400 "Request body validation
             # error. See property 'headers'". The footer <a> link in the email
-            # body is the only unsubscribe path for now. Revisit if ACS adds
-            # first-class one-click support.
+            # body is the only unsubscribe path. Revisit if ACS adds first-class
+            # one-click support.
+            #
+            # Recipients go in BCC so they don't see each other's addresses.
+            # `to` is omitted: ACS allows BCC-only sends.
             payload = {
                 "senderAddress": sender_address,
-                "recipients": {"to": [{"address": recipient["address"]}]},
+                "recipients": {
+                    "bcc": [{"address": r["address"]} for r in batch],
+                },
                 "content": {"subject": subject, "html": html, "plainText": text},
                 "replyTo": [{"address": reply_to}],
                 "userEngagementTrackingDisabled": True,
             }
-            last_html = html
 
+            sent += len(batch)
             if dry_run:
+                sample = ", ".join(r["address"] for r in batch[:3])
+                more = "" if len(batch) <= 3 else f" (+{len(batch) - 3} more)"
                 print(
-                    f"  [DRY] would send to {recipient['address']} "
-                    f"(oid={recipient['oid'][:8]}...)"
+                    f"  [DRY] would send batch {sent - len(batch) + 1}-{sent}/{total}: "
+                    f"{sample}{more}"
                 )
                 continue
             op_id = send_one(acs_token, acs_endpoint, payload)
-            print(f"  sent to {recipient['address']} -> operation {op_id}")
+            print(
+                f"  sent batch {sent - len(batch) + 1}-{sent}/{total} "
+                f"({len(batch)} recipients) -> operation {op_id}"
+            )
             time.sleep(SEND_PAUSE_SECONDS)
 
-        if dry_run and last_html:
+        if dry_run:
             print("\n  [DRY] HTML preview (first 600 chars):")
-            print("  " + last_html[:600].replace("\n", "\n  "))
+            print("  " + html[:600].replace("\n", "\n  "))
 
 
 if __name__ == "__main__":
