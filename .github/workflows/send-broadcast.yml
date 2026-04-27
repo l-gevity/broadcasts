@@ -4,12 +4,10 @@ name: Send Broadcast
 # The detection step filters to *newly added* files only — editing an
 # already-sent broadcast is a no-op.
 #
-# DRY-RUN MODE: This workflow ships with `DRY_RUN: 'true'` hardcoded.
-# To go live for real:
-#   1. Open a PR changing `DRY_RUN: 'true'` → `DRY_RUN: 'false'` below.
-#   2. Get a review.
-#   3. Merge.
-# This guards against accidental sends from a typo or careless commit.
+# DRY-RUN MODE: To temporarily disable real sends (e.g. while testing a new
+# template or layout), flip `DRY_RUN: 'false'` → `DRY_RUN: 'true'` below
+# via PR. The workflow ships live (`'false'`) — flip in the opposite direction
+# only when the test plan requires inspecting rendered HTML without dispatch.
 
 on:
     push:
@@ -28,7 +26,7 @@ permissions:
     id-token: write
 
 env:
-    DRY_RUN: 'true'
+    DRY_RUN: 'false'
 
 jobs:
     send:
