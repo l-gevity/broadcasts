@@ -252,19 +252,17 @@ def main() -> None:
             )
             html = build_email_html(rendered_body, fm, unsubscribe_url)
             text = build_plain_text(fm, body_md, unsubscribe_url)
+            # NB: ACS Email rejects most reserved headers (incl. List-Unsubscribe
+            # / RFC 8058 one-click headers) with HTTP 400 "Request body validation
+            # error. See property 'headers'". The footer <a> link in the email
+            # body is the only unsubscribe path for now. Revisit if ACS adds
+            # first-class one-click support.
             payload = {
                 "senderAddress": sender_address,
                 "recipients": {"to": [{"address": recipient["address"]}]},
                 "content": {"subject": subject, "html": html, "plainText": text},
                 "replyTo": [{"address": reply_to}],
                 "userEngagementTrackingDisabled": True,
-                "headers": [
-                    {"name": "List-Unsubscribe", "value": f"<{unsubscribe_url}>"},
-                    {
-                        "name": "List-Unsubscribe-Post",
-                        "value": "List-Unsubscribe=One-Click",
-                    },
-                ],
             }
             last_html = html
 
