@@ -1,0 +1,164 @@
+name: Send Broadcast
+
+# Triggers on push to main when files are added/changed in broadcasts/.
+# The detection step filters to *newly added* files only — editing an
+# already-sent broadcast is a no-op.
+#
+# DRY-RUN MODE: This workflow ships with `DRY_RUN: 'true'` hardcoded.
+# To go live for real:
+#   1. Open a PR changing `DRY_RUN: 'true'` → `DRY_RUN: 'false'` below.
+#   2. Get a review.
+#   3. Merge.
+# This guards against accidental sends from a typo or careless commit.
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - 'broadcasts/**/*.md'
+    workflow_dispatch:
+        inputs:
+            file:
+                description: 'Broadcast file to (re)send (relative path, e.g. broadcasts/2026-04-27-test.md)'
+                required: true
+                type: string
+
+permissions:
+    contents: read
+    id-token: write
+
+env:
+    DRY_RUN: 'true'
+
+jobs:
+    send:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 2
+
+            - name: Detect broadcast files to process
+              id: detect
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                    FILES="${{ github.event.inputs.file }}"
+                    if [ ! -f "$FILES" ]; then
+                      echo "ERROR: workflow_dispatch input file not found: $FILES"
+                      exit 1
+                    fi
+                    echo "Mode: workflow_dispatch (manual)"
+                  else
+                    BEFORE="${{ github.event.before }}"
+                    if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || [ -z "$BEFORE" ]; then
+                      echo "First push to main — processing all broadcast files"
+                      FILES=$(git ls-files 'broadcasts/*.md' 'broadcasts/**/*.md' 2>/dev/null || true)
+                    else
+                      echo "Push detection: comparing $BEFORE..${{ github.sha }}"
+                      FILES=$(git diff --diff-filter=A --name-only "$BEFORE" "${{ github.sha }}" -- 'broadcasts/*.md' 'broadcasts/**/*.md' || true)
+                    fi
+                  fi
+                  if [ -z "$FILES" ]; then
+                    echo "No new broadcast files to send — exiting cleanly."
+                    echo "files=" >> $GITHUB_OUTPUT
+                    exit 0
+                  fi
+                  echo "Files to process:"
+                  echo "$FILES" | sed 's/^/  /'
+                  {
+                    echo 'files<<EOF'
+                    echo "$FILES"
+                    echo 'EOF'
+                  } >> $GITHUB_OUTPUT
+
+            - name: Setup Python
+              if: steps.detect.outputs.files != ''
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install dependencies
+              if: steps.detect.outputs.files != ''
+              run: pip install --quiet markdown==3.7 pyyaml==6.0.2
+
+            - name: Azure Login (federated OIDC, for ACS)
+              if: steps.detect.outputs.files != ''
+              uses: azure/login@v2
+              with:
+                  client-id: ${{ secrets.AZURE_CLIENT_ID }}
+                  tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+                  subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+            - name: Acquire Microsoft Graph token (CIAM client credentials)
+              if: steps.detect.outputs.files != ''
+              id: graph
+              run: |
+                  RESPONSE=$(curl -s -X POST \
+                    "https://login.microsoftonline.com/${{ secrets.CIAM_TENANT_ID }}/oauth2/v2.0/token" \
+                    -H "Content-Type: application/x-www-form-urlencoded" \
+                    --data-urlencode "client_id=${{ secrets.CIAM_CLIENT_ID }}" \
+                    --data-urlencode "client_secret=${{ secrets.CIAM_CLIENT_SECRET }}" \
+                    --data-urlencode "scope=https://graph.microsoft.com/.default" \
+                    --data-urlencode "grant_type=client_credentials")
+                  TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: Graph token acquisition failed"
+                    echo "$RESPONSE" | jq '.'
+                    exit 1
+                  fi
+                  echo "::add-mask::$TOKEN"
+                  echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+            - name: Acquire ACS access token
+              if: steps.detect.outputs.files != ''
+              id: acs
+              run: |
+                  TOKEN=$(az account get-access-token --resource https://communication.azure.com --query accessToken -o tsv)
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: ACS token acquisition failed"
+                    exit 1
+                  fi
+                  echo "::add-mask::$TOKEN"
+                  echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+            - name: Resolve b2c-extensions-app ID
+              if: steps.detect.outputs.files != ''
+              id: ext
+              env:
+                  GRAPH_TOKEN: ${{ steps.graph.outputs.token }}
+              run: |
+                  APPS=$(curl -s -H "Authorization: Bearer ${GRAPH_TOKEN}" \
+                    "https://graph.microsoft.com/v1.0/applications")
+                  EXT_APP_ID=$(echo "$APPS" | jq -r '.value[] | select(.displayName | startswith("b2c-extensions-app")) | .appId' | tr -d '-')
+                  if [ -z "$EXT_APP_ID" ] || [ "$EXT_APP_ID" = "null" ]; then
+                    echo "ERROR: Could not find b2c-extensions-app — required for the marketingOptInAt extension attribute name resolution"
+                    exit 1
+                  fi
+                  echo "ext_app_id=$EXT_APP_ID" >> $GITHUB_OUTPUT
+
+            - name: Send broadcasts
+              if: steps.detect.outputs.files != ''
+              env:
+                  GRAPH_TOKEN: ${{ steps.graph.outputs.token }}
+                  ACS_TOKEN: ${{ steps.acs.outputs.token }}
+                  EXT_APP_ID: ${{ steps.ext.outputs.ext_app_id }}
+                  USER_HMAC_KEY: ${{ secrets.USER_HMAC_KEY }}
+                  ACS_ENDPOINT: ${{ vars.ACS_ENDPOINT }}
+                  SENDER_ADDRESS: ${{ vars.SENDER_ADDRESS }}
+                  REPLY_TO_ADDRESS: ${{ vars.REPLY_TO_ADDRESS }}
+                  UNSUBSCRIBE_BASE_URL: ${{ vars.UNSUBSCRIBE_BASE_URL }}
+                  REPO_FULL_NAME: ${{ github.repository }}
+                  REF: ${{ github.ref_name }}
+                  FILES: ${{ steps.detect.outputs.files }}
+              run: python .github/scripts/send_broadcast.py
+
+            - name: Summary
+              if: always() && steps.detect.outputs.files != ''
+              run: |
+                  echo "## Broadcast run summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "- DRY_RUN: \`${DRY_RUN}\`" >> $GITHUB_STEP_SUMMARY
+                  echo "- Files processed:" >> $GITHUB_STEP_SUMMARY
+                  echo '${{ steps.detect.outputs.files }}' | sed 's/^/  - /' >> $GITHUB_STEP_SUMMARY
