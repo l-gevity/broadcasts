@@ -1,6 +1,6 @@
 ---
 subject: 'L-GEVITY: nieuwe nieuwsbrief — opt-in indien gewenst'
-preheader: We hebben een nieuwsbrief toegevoegd. Doe niets als je geen e-mails wilt.
+preheader: We hebben een nieuwsbrief toegevoegd. Zet deze aan op je profiel!
 from: L-GEVITY <noreply@mail.l-gevity.nl>
 kind: transactional
 ---
