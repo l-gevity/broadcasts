@@ -104,7 +104,7 @@ jobs:
                   ACS_TOKEN: ${{ steps.acs.outputs.token }}
                   EXT_APP_ID: ${{ vars.EXT_APP_ID }}
                   ACS_ENDPOINT: ${{ vars.ACS_ENDPOINT }}
-                  SENDER_ADDRESS: noreply@mail.l-gevity.nl
+                  SENDER_ADDRESS: broadcasts@mail.l-gevity.nl
                   SENDER_DISPLAY_NAME: L-GEVITY
                   REPLY_TO_ADDRESS: ${{ vars.REPLY_TO_ADDRESS }}
                   REPO_FULL_NAME: ${{ github.repository }}
@@ -121,7 +121,7 @@ jobs:
                   echo "## Service announcement dispatch — \`${{ inputs.file }}\`" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "- Mode: **$MODE**" >> $GITHUB_STEP_SUMMARY
-                  echo "- Sender: \`noreply@mail.l-gevity.nl\`" >> $GITHUB_STEP_SUMMARY
+                  echo "- Sender: \`broadcasts@mail.l-gevity.nl\`" >> $GITHUB_STEP_SUMMARY
                   if [ -n "${{ inputs.limit }}" ]; then
                     echo "- Limit: ${{ inputs.limit }}" >> $GITHUB_STEP_SUMMARY
                   fi
