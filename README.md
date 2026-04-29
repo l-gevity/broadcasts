@@ -12,15 +12,15 @@ Newsletter / broadcast content for L-GEVITY members.
   Markdown file.
 - **One file = one send.** A new file added to `broadcasts/*.md` on `main`
   triggers an automatic broadcast. Files in `service/*.md` are dispatched
-  manually by scripts in the main `l-gevity/l-gevity` repo. Editing a file
-  already on `main` does NOT retrigger anything.
+  manually via the `dispatch-service.yml` workflow in this repo. Editing a
+  file already on `main` does NOT retrigger anything.
 
 ### Two folders, two channels
 
 | Folder | Purpose | Sender | Audience | Trigger |
 | --- | --- | --- | --- | --- |
 | `broadcasts/` | Marketing newsletters — opt-in only | `broadcasts@mail.l-gevity.nl` | Members with `marketingOptInAt` set | `send-broadcast.yml` on push (BCC-batched) |
-| `service/` | Transactional service announcements (e.g. "we added a new feature") | `noreply@mail.l-gevity.nl` | The audience appropriate to the announcement (typically all members), under the existing service relationship | None in this repo — dispatched manually from `scripts/announce-*.ts` in the main repo |
+| `service/` | Transactional service announcements (e.g. "we added a new feature") | `noreply@mail.l-gevity.nl` | All enabled members with email, under the existing service relationship | `dispatch-service.yml` — workflow_dispatch only, dry-run by default |
 
 Service announcements MUST be genuine service-relationship communications,
 not marketing dressed up as service. When in doubt, default to `broadcasts/`
@@ -61,15 +61,31 @@ kind: transactional
 ---
 
 Markdown body. Same conventions as a broadcast — Markdown features, image
-rewriting — but rendered and dispatched by a script in the main repo, not
-by `send-broadcast.yml`. The path filter on `broadcasts/**/*.md` ensures
+rewriting — but rendered and dispatched by `dispatch-service.yml`, not by
+`send-broadcast.yml`. The path filter on `broadcasts/**/*.md` ensures
 files under `service/` never trigger an auto-send.
 ```
 
-The dispatching script (e.g.
-`l-gevity/l-gevity:scripts/announce-newsletter-optin.ts`) fetches the file
-at send time, parses the frontmatter, and sends per-recipient (no BCC) from
-`noreply@mail.l-gevity.nl`.
+To send, dispatch the workflow manually from your terminal:
+
+```bash
+# Pilot to first 5 recipients (dry-run preview comes free without --confirm)
+gh workflow run dispatch-service.yml --repo l-gevity/broadcasts \
+  -f file=service/2026-04-29-newsletter-announcement.md \
+  -f confirm=true \
+  -f limit=5
+
+# Spot-check the pilot in your inbox, then send to everyone:
+gh workflow run dispatch-service.yml --repo l-gevity/broadcasts \
+  -f file=service/2026-04-29-newsletter-announcement.md \
+  -f confirm=true
+```
+
+The dispatcher (`.github/scripts/dispatch_service.py`) fetches the file,
+validates `kind: transactional` in frontmatter (safety guard), queries
+Graph for all enabled members with email, and sends per-recipient (no BCC)
+from `noreply@mail.l-gevity.nl`. Defaults are dry-run; you must pass
+`-f confirm=true` to actually send.
 
 ## Templates
 
@@ -82,8 +98,10 @@ Email layouts live in `templates/*.html` and use
 - `templates/default.html` — extends `base.html`, fills `content` with the
   rendered Markdown body. Used when broadcast frontmatter has no `template`
   key.
-- `templates/partials/footer.html` — legal text + unsubscribe link, included
-  by `base.html`.
+- `templates/partials/footer.html` — legal text included by `base.html`.
+  Branches on the `kind` frontmatter key: marketing renders the
+  unsubscribe link, transactional renders the service-mededeling note
+  (no unsubscribe — there's nothing to unsubscribe from).
 
 To use a different layout per broadcast, set `template` in frontmatter:
 
@@ -103,17 +121,25 @@ To add a layout, drop a new file in `templates/` (typically `{% extends
 "base.html" %}`) and reference it by name (without the `.html`) in
 frontmatter.
 
-## Workflow
+## Workflows
 
-`.github/workflows/send-broadcast.yml` runs on push to `main` for newly added
-files matching `broadcasts/**/*.md`. Files in `service/` are deliberately
-excluded — those are dispatched from the main repo. The workflow ships with
-`DRY_RUN: 'false'` (live); to temporarily disable broadcast sends (e.g.
-while validating a new template), flip the env var via PR review.
+This repo has two send pipelines, each backed by a workflow + script pair:
 
-`.github/scripts/send_broadcast.py` does the rendering, recipient lookup,
-and ACS REST send (BCC-batched, up to 50 recipients per call) for the
-broadcasts pipeline.
+- **Marketing**: `.github/workflows/send-broadcast.yml` runs on push to
+  `main` for newly added files matching `broadcasts/**/*.md`. Ships with
+  `DRY_RUN: 'false'` (live); to temporarily disable broadcast sends (e.g.
+  while validating a new template), flip the env var via PR review.
+  `.github/scripts/send_broadcast.py` does the rendering, recipient lookup
+  (opt-in only), and ACS REST send (BCC-batched, up to 50 per call).
+- **Transactional**: `.github/workflows/dispatch-service.yml` runs only on
+  `workflow_dispatch` and is dry-run by default (`confirm: 'false'` input).
+  `.github/scripts/dispatch_service.py` queries ALL enabled members with
+  email, validates `kind: transactional` in the file frontmatter, and
+  sends per-recipient.
+
+Files under `service/` never trigger the marketing workflow (path filter
+on `broadcasts/**/*.md`). Files under `broadcasts/` trip a safety guard
+in the transactional dispatcher (rejected if `kind != 'transactional'`).
 
 For the rationale behind every design choice (auth pattern, consent model,
 templating engine, etc.), see [DECISIONS.md](./DECISIONS.md).
@@ -125,12 +151,21 @@ in the main repo. For the original design discussion, see
 
 ## Unsubscribe
 
-Every email's footer links to the L-GEVITY profile page (`UNSUBSCRIBE_URL`,
-typically `https://l-gevity.nl/profile.html#marketing`). The recipient logs
-in (if not already authenticated) and toggles off the same
+Marketing emails (`broadcasts/`) carry a footer link to the L-GEVITY
+profile page (`UNSUBSCRIBE_URL`, typically
+`https://l-gevity.nl/profile.html#marketing`). The recipient logs in (if
+not already authenticated) and toggles off the same
 `<l-gevity-marketing-opt-in>` switch they used to opt in. There is no
 per-recipient token, no SWA `/api/unsubscribe` call in the new flow, and no
 `USER_HMAC_KEY` shared between repos.
+
+Transactional emails (`service/`) have no unsubscribe link — there is no
+list to unsubscribe from. They are sent under the existing
+service-relationship lawful basis (GDPR Art. 6(1)(b) / ePrivacy soft
+opt-in for service announcements), one-shot per topic, and they explicitly
+state in the body that they're a service announcement. If the recipient
+does not want a related marketing follow-up, they simply don't opt in to
+the marketing list.
 
 This is symmetric with the consent surface: opt-in already requires login
 (the profile-page toggle is the only opt-in path), so requiring login to opt
