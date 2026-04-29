@@ -19,7 +19,7 @@ functies? Log dan in op je profiel en zet de schakelaar "Marketing" aan:
 Doe je niets, dan blijf je niet aangemeld. We sturen je geen verdere
 marketing-mails zonder je expliciete toestemming.
 
-Vragen? Beantwoord deze e-mail of mail naar info@l-gevity.nl.
+Vragen? Beantwoord deze e-mail.
 
 — L-GEVITY  
 <https://l-gevity.nl>
