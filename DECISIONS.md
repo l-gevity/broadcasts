@@ -74,15 +74,47 @@ initialization.
 `workflow_dispatch` with a `file` input bypasses the diff detection so
 testing flows can re-trigger an already-sent file deliberately.
 
-### Marketing only; mandatory announcements use a separate channel
+### Two channels — `broadcasts/` (marketing) and `service/` (transactional)
 
-This list is for opt-in marketing only. Mandatory service announcements
-(login URL changes, billing notices, security incidents) do not belong
-here, because subscribers can unsubscribe and not all members are
-subscribed. Those use the existing in-app banner system or
-transactional email from `noreply@l-gevity.nl`, which has a different
-lawful basis under GDPR (Art. 6(1)(b) contract performance, not
-marketing consent).
+This repo hosts BOTH channels with strictly different governance. The
+folder a file lives in determines the entire send model:
+
+- **`broadcasts/`** — opt-in marketing. Sender
+  `broadcasts@mail.l-gevity.nl`. Audience: members with
+  `marketingOptInAt` set. BCC-batched. Auto-triggered by
+  `send-broadcast.yml` on push.
+- **`service/`** — transactional service announcements (feature changes,
+  ToS updates, security notices, billing changes). Sender
+  `noreply@mail.l-gevity.nl` (separate ACS sender username on the same
+  verified subdomain, provisioned 2026-04-29). Audience: all enabled
+  members with email, regardless of marketing consent. Per-recipient
+  (no BCC). Manually dispatched via `dispatch-service.yml`
+  (`workflow_dispatch` only, dry-run by default).
+
+The legal basis differs by folder, not by content:
+
+- `broadcasts/` → GDPR Art. 6(1)(a) explicit consent (the
+  `marketingOptInAt` extension records when consent was given).
+- `service/` → GDPR Art. 6(1)(b) contract performance / ePrivacy
+  soft-opt-in for service announcements (the recipient has an active
+  L-GEVITY account; the message concerns their service, not promotion).
+
+A file MUST declare `kind: transactional` in its frontmatter to be
+sent via `dispatch-service.yml`. The dispatcher rejects files without
+this guard. This prevents an accidentally-misrouted marketing file
+from reaching all members under a "transactional" framing.
+
+Use `service/` only for genuine service-relationship communications.
+The distinguishing test: would a member be surprised or upset to
+receive this if they had explicitly declined marketing? If yes, it's
+marketing — put it in `broadcasts/` with an opt-in CTA.
+
+The previous formulation of this section ("transactional email from
+`noreply@l-gevity.nl`") was aspirational; the apex domain is not yet
+verified in ACS, so the transactional sender currently lives on the
+same verified subdomain as broadcasts (`mail.l-gevity.nl`) with a
+distinct local-part. Verifying the apex would let us separate
+reputation pools further.
 
 ### No bounce/complaint handling at current scale
 
