@@ -85,11 +85,11 @@ folder a file lives in determines the entire send model:
   `send-broadcast.yml` on push.
 - **`service/`** — transactional service announcements (feature changes,
   ToS updates, security notices, billing changes). Sender
-  `noreply@mail.l-gevity.nl` (separate ACS sender username on the same
-  verified subdomain, provisioned 2026-04-29). Audience: all enabled
-  members with email, regardless of marketing consent. Per-recipient
-  (no BCC). Manually dispatched via `dispatch-service.yml`
-  (`workflow_dispatch` only, dry-run by default).
+  `broadcasts@mail.l-gevity.nl` (same as marketing — see "Single sender
+  for both channels" below). Audience: all enabled members with email,
+  regardless of marketing consent. Per-recipient (no BCC). Manually
+  dispatched via `dispatch-service.yml` (`workflow_dispatch` only,
+  dry-run by default).
 
 The legal basis differs by folder, not by content:
 
@@ -109,12 +109,48 @@ The distinguishing test: would a member be surprised or upset to
 receive this if they had explicitly declined marketing? If yes, it's
 marketing — put it in `broadcasts/` with an opt-in CTA.
 
-The previous formulation of this section ("transactional email from
-`noreply@l-gevity.nl`") was aspirational; the apex domain is not yet
-verified in ACS, so the transactional sender currently lives on the
-same verified subdomain as broadcasts (`mail.l-gevity.nl`) with a
-distinct local-part. Verifying the apex would let us separate
-reputation pools further.
+### Single sender for both channels (`broadcasts@mail.l-gevity.nl`)
+
+We initially provisioned `noreply@mail.l-gevity.nl` as a separate
+sender username for the transactional channel (intuition: separate
+reputation pools, separate semantic purpose). The first pilot dispatch
+on 2026-04-29 produced a 2-of-7 SMTP-550 spam-filter rejection rate
+(~29%) on cold `noreply@`, vs. zero rejections on `broadcasts@` over
+its first 2 days of use. ACS metrics confirmed all rejections were
+soft 550s (receiver-side spam filtering, not invalid mailboxes).
+
+Reasoning for consolidating on `broadcasts@`:
+
+- **Reputation reuse**: `broadcasts@` already has 2+ days of clean
+  delivery history. Receivers' spam engines have begun learning the
+  address. Cold-starting a second local-part on the same domain only
+  partially inherits this — Gmail and Outlook in particular track
+  reputation per sender address, not just per domain.
+- **Concentration of signal**: Microsoft's quota team analyzes ACS
+  delivery patterns by domain/sender. One sender with consistent good
+  delivery > two senders each with mediocre delivery.
+- **Operational simplicity**: one address to monitor, one DKIM key
+  pattern, one warm-up history.
+
+The cost is mild semantic mismatch — "broadcasts@" reads as marketing
+in a recipient's mental model. Mitigated by:
+
+- Display name still differs (`L-GEVITY` for transactional vs.
+  `L-GEVITY Broadcasts` for marketing).
+- Body content explicitly self-identifies ("this is a service
+  announcement, not marketing").
+- Receiver filters operate primarily on domain + sender address, not
+  on parsing the local-part for semantic intent.
+
+The `noreply@` sender username remains provisioned in ACS but unused.
+We can revisit splitting if the consolidated reputation ever degrades
+or if Microsoft's quota team requests address separation.
+
+The previous reference to `noreply@l-gevity.nl` (the apex) was
+aspirational; the apex isn't verified in ACS. If we ever want a
+visually distinct transactional sender that doesn't reuse `broadcasts@`,
+verifying the apex (so we can use `noreply@l-gevity.nl`) is the cleaner
+path than re-introducing `noreply@mail.l-gevity.nl`.
 
 ### No bounce/complaint handling at current scale
 
@@ -354,9 +390,11 @@ ACS Email offers two domain modes:
 
 We use `mail.l-gevity.nl` rather than the apex `l-gevity.nl` because
 sending from a dedicated subdomain isolates broadcast reputation from
-the apex domain. If a broadcast triggers a spam complaint cascade,
-only `mail.l-gevity.nl` reputation is affected; transactional mail
-from a future `noreply@l-gevity.nl` would be unaffected.
+the apex domain. If a broadcast (or service announcement, since both
+channels share `broadcasts@mail.l-gevity.nl` per "Single sender for
+both channels" above) triggers a spam complaint cascade, only the
+subdomain reputation is affected; the apex stays clean for any future
+`noreply@l-gevity.nl` once we verify it.
 
 ### `dataLocation: europe` for both ACS and ECS
 
