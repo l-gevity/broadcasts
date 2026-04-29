@@ -152,6 +152,41 @@ visually distinct transactional sender that doesn't reuse `broadcasts@`,
 verifying the apex (so we can use `noreply@l-gevity.nl`) is the cleaner
 path than re-introducing `noreply@mail.l-gevity.nl`.
 
+### Body-content rules: avoid bare email addresses (ProtonMail trigger)
+
+A long bisect on 2026-04-29 against ProtonMail's anti-phishing filter
+(catch-all on `patricksavalle.com`) isolated the following content rule:
+**bodies that contain a bare email address (especially one different
+from the From header) get silently quarantined**, even when the address
+is deliverable. Replacing `info@l-gevity.nl` with `broadcasts@mail.l-gevity.nl`
+in the body did not unblock; only removing the address entirely did.
+
+We also enabled Cloudflare Email Routing on the apex `l-gevity.nl` so
+that `info@l-gevity.nl` is now an actually-deliverable mailbox forwarding
+to a personal address. This is good infra hygiene (apex MX exists, replies
+to the `Reply-To: info@l-gevity.nl` header now route somewhere) but it did
+NOT unblock ProtonMail on its own — the filter cares about body content,
+not header deliverability.
+
+Practical authoring rules for `service/` and `broadcasts/` files:
+
+- Do not include bare email addresses in the body. Tell users to
+  "Beantwoord deze e-mail" (reply) — the `Reply-To` header handles the
+  rest. The address `info@l-gevity.nl` belongs in the header, not the
+  body.
+- Sender + Reply-To addresses can differ (broadcasts@ → info@) — that is
+  not a phishing signal as long as the body doesn't visibly mention a
+  different address.
+- The `kind`-branched footer in `templates/partials/footer.html` is fine
+  on both branches; missing/present unsubscribe link is not the dominant
+  signal (proven by tests where adding the marketing-style unsubscribe
+  link did not unblock ProtonMail).
+- Other contributing factors that combine to push past the ProtonMail
+  threshold but pass on their own: table-based HTML chrome, multiple
+  mentions of "marketing" / "nieuwsbrief" in the body, multiple URLs in
+  the body, marketing-style sign-off ("— L-GEVITY"). None of these are
+  individually fatal but each adds to the score.
+
 ### No bounce/complaint handling at current scale
 
 ACS Email exposes bounce and complaint events via Event Grid. We don't
