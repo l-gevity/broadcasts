@@ -8,15 +8,24 @@ Newsletter / broadcast content for L-GEVITY members.
   it is sent. Never include personally identifiable information, per-recipient
   content, or anything you wouldn't paste into a public Slack channel.
 - **All recipients receive identical content.** No per-user templating beyond
-  the unsubscribe footer. Every opted-in member sees exactly what is in the
+  the unsubscribe footer. Every recipient sees exactly what is in the
   Markdown file.
-- **One file = one broadcast.** A new file added to `broadcasts/*.md` on
-  `main` triggers a send. Editing a file already on `main` does NOT
-  retrigger.
-- **Marketing only.** Mandatory service announcements (e.g. "we changed the
-  login URL") use a different channel: in-app banner or transactional email
-  from `noreply@l-gevity.nl`. Subscribers to this list have all opted in
-  voluntarily and can opt out at any time.
+- **One file = one send.** A new file added to `broadcasts/*.md` on `main`
+  triggers an automatic broadcast. Files in `service/*.md` are dispatched
+  manually by scripts in the main `l-gevity/l-gevity` repo. Editing a file
+  already on `main` does NOT retrigger anything.
+
+### Two folders, two channels
+
+| Folder | Purpose | Sender | Audience | Trigger |
+| --- | --- | --- | --- | --- |
+| `broadcasts/` | Marketing newsletters — opt-in only | `broadcasts@mail.l-gevity.nl` | Members with `marketingOptInAt` set | `send-broadcast.yml` on push (BCC-batched) |
+| `service/` | Transactional service announcements (e.g. "we added a new feature") | `noreply@mail.l-gevity.nl` | The audience appropriate to the announcement (typically all members), under the existing service relationship | None in this repo — dispatched manually from `scripts/announce-*.ts` in the main repo |
+
+Service announcements MUST be genuine service-relationship communications,
+not marketing dressed up as service. When in doubt, default to `broadcasts/`
+and an opt-in CTA. See [DECISIONS.md](./DECISIONS.md) for the
+distinguishing test.
 
 ## Authoring a broadcast
 
@@ -37,6 +46,30 @@ Embed images as `![alt](images/your-image.png)`. They are auto-rewritten to
 the jsDelivr CDN at send time, so they render in mail clients without a
 hosting dependency.
 ```
+
+## Authoring a service announcement
+
+Create `service/YYYY-MM-DD-slug.md` with the same frontmatter shape as a
+broadcast, plus `kind: transactional`:
+
+```markdown
+---
+subject: 'L-GEVITY: nieuwe nieuwsbrief — opt-in indien gewenst'
+preheader: One-line preview shown next to the subject in inboxes
+from: L-GEVITY <noreply@mail.l-gevity.nl>
+kind: transactional
+---
+
+Markdown body. Same conventions as a broadcast — Markdown features, image
+rewriting — but rendered and dispatched by a script in the main repo, not
+by `send-broadcast.yml`. The path filter on `broadcasts/**/*.md` ensures
+files under `service/` never trigger an auto-send.
+```
+
+The dispatching script (e.g.
+`l-gevity/l-gevity:scripts/announce-newsletter-optin.ts`) fetches the file
+at send time, parses the frontmatter, and sends per-recipient (no BCC) from
+`noreply@mail.l-gevity.nl`.
 
 ## Templates
 
@@ -73,12 +106,14 @@ frontmatter.
 ## Workflow
 
 `.github/workflows/send-broadcast.yml` runs on push to `main` for newly added
-files in `broadcasts/`. Ships with `DRY_RUN: 'false'` (live). To temporarily
-disable sends (e.g. while validating a new template), flip the env var via
-PR review.
+files matching `broadcasts/**/*.md`. Files in `service/` are deliberately
+excluded — those are dispatched from the main repo. The workflow ships with
+`DRY_RUN: 'false'` (live); to temporarily disable broadcast sends (e.g.
+while validating a new template), flip the env var via PR review.
 
 `.github/scripts/send_broadcast.py` does the rendering, recipient lookup,
-and ACS REST send (BCC-batched, up to 50 recipients per call).
+and ACS REST send (BCC-batched, up to 50 recipients per call) for the
+broadcasts pipeline.
 
 For the rationale behind every design choice (auth pattern, consent model,
 templating engine, etc.), see [DECISIONS.md](./DECISIONS.md).
