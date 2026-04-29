@@ -115,8 +115,9 @@ jobs:
 
             - name: Summary
               if: always()
+              env:
+                  MODE: ${{ inputs.confirm == 'true' && 'LIVE SEND' || 'dry-run' }}
               run: |
-                  MODE='${{ inputs.confirm == ''true'' && ''LIVE SEND'' || ''dry-run'' }}'
                   echo "## Service announcement dispatch — \`${{ inputs.file }}\`" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "- Mode: **$MODE**" >> $GITHUB_STEP_SUMMARY
