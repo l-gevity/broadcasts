@@ -1,0 +1,126 @@
+name: Dispatch service announcement
+
+# Manual dispatch only — service announcements are intentionally NOT
+# auto-triggered. Adding files to service/ or editing them does nothing on its
+# own. Trigger via:
+#
+#   gh workflow run dispatch-service.yml --repo l-gevity/broadcasts \
+#     -f file=service/2026-04-29-newsletter-announcement.md \
+#     -f confirm=true \
+#     -f limit=5      (optional pilot)
+#
+# Defaults are dry-run for safety. The dispatcher additionally rejects files
+# whose frontmatter is missing `kind: transactional`.
+
+on:
+    workflow_dispatch:
+        inputs:
+            file:
+                description: 'Path to service/*.md (e.g. service/2026-04-29-foo.md)'
+                required: true
+                type: string
+            confirm:
+                description: 'Set to "true" to actually send. Default is dry-run.'
+                required: false
+                default: 'false'
+                type: string
+            limit:
+                description: 'Optional: cap recipient count for piloting (e.g. 5)'
+                required: false
+                type: string
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+    dispatch:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Validate inputs
+              run: |
+                  if [[ ! "${{ inputs.file }}" =~ ^service/.+\.md$ ]]; then
+                    echo "ERROR: file must be under service/ and end in .md"
+                    exit 1
+                  fi
+                  if [[ ! -f "${{ inputs.file }}" ]]; then
+                    echo "ERROR: file not found: ${{ inputs.file }}"
+                    exit 1
+                  fi
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install dependencies
+              run: pip install --quiet markdown==3.7 pyyaml==6.0.2 jinja2==3.1.4
+
+            - name: Azure Login (federated OIDC, for ACS)
+              uses: azure/login@v2
+              with:
+                  client-id: ${{ secrets.AZURE_CLIENT_ID }}
+                  tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+                  subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+            - name: Acquire Microsoft Graph token (CIAM client credentials)
+              id: graph
+              run: |
+                  RESPONSE=$(curl -s -X POST \
+                    "https://login.microsoftonline.com/${{ secrets.CIAM_TENANT_ID }}/oauth2/v2.0/token" \
+                    -H "Content-Type: application/x-www-form-urlencoded" \
+                    --data-urlencode "client_id=${{ secrets.CIAM_CLIENT_ID }}" \
+                    --data-urlencode "client_secret=${{ secrets.CIAM_CLIENT_SECRET }}" \
+                    --data-urlencode "scope=https://graph.microsoft.com/.default" \
+                    --data-urlencode "grant_type=client_credentials")
+                  TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: Graph token acquisition failed"
+                    echo "$RESPONSE" | jq '.'
+                    exit 1
+                  fi
+                  echo "::add-mask::$TOKEN"
+                  echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+            - name: Acquire ACS access token
+              id: acs
+              run: |
+                  TOKEN=$(az account get-access-token --resource https://communication.azure.com --query accessToken -o tsv)
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: ACS token acquisition failed"
+                    exit 1
+                  fi
+                  echo "::add-mask::$TOKEN"
+                  echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+            - name: Dispatch service announcement
+              env:
+                  DRY_RUN: ${{ inputs.confirm == 'true' && 'false' || 'true' }}
+                  GRAPH_TOKEN: ${{ steps.graph.outputs.token }}
+                  ACS_TOKEN: ${{ steps.acs.outputs.token }}
+                  EXT_APP_ID: ${{ vars.EXT_APP_ID }}
+                  ACS_ENDPOINT: ${{ vars.ACS_ENDPOINT }}
+                  SENDER_ADDRESS: noreply@mail.l-gevity.nl
+                  SENDER_DISPLAY_NAME: L-GEVITY
+                  REPLY_TO_ADDRESS: ${{ vars.REPLY_TO_ADDRESS }}
+                  REPO_FULL_NAME: ${{ github.repository }}
+                  REF: ${{ github.ref_name }}
+                  FILE: ${{ inputs.file }}
+                  LIMIT: ${{ inputs.limit }}
+              run: python .github/scripts/dispatch_service.py
+
+            - name: Summary
+              if: always()
+              run: |
+                  MODE='${{ inputs.confirm == ''true'' && ''LIVE SEND'' || ''dry-run'' }}'
+                  echo "## Service announcement dispatch — \`${{ inputs.file }}\`" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "- Mode: **$MODE**" >> $GITHUB_STEP_SUMMARY
+                  echo "- Sender: \`noreply@mail.l-gevity.nl\`" >> $GITHUB_STEP_SUMMARY
+                  if [ -n "${{ inputs.limit }}" ]; then
+                    echo "- Limit: ${{ inputs.limit }}" >> $GITHUB_STEP_SUMMARY
+                  fi
