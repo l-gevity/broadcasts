@@ -2,11 +2,16 @@
     <td
         style="border-top:1px solid #e5e7eb;padding-top:16px;font-size:12px;color:#6b7280;"
     >
+        {% if kind == 'transactional' %}
+        Je ontvangt deze e-mail omdat je een L-GEVITY-account hebt. Dit is een
+        eenmalige service-mededeling — geen marketing.
+        {% else %}
         Je ontvangt deze e-mail omdat je je hebt aangemeld voor updates van L-GEVITY.
         <a
             href="{{ unsubscribe_url }}"
             style="color:#6b7280;text-decoration:underline;"
             >Afmelden</a
         >.
+        {% endif %}
     </td>
 </tr>
