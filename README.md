@@ -20,7 +20,7 @@ Newsletter / broadcast content for L-GEVITY members.
 | Folder | Purpose | Sender | Audience | Trigger |
 | --- | --- | --- | --- | --- |
 | `broadcasts/` | Marketing newsletters — opt-in only | `broadcasts@mail.l-gevity.nl` | Members with `marketingOptInAt` set | `send-broadcast.yml` on push (BCC-batched) |
-| `service/` | Transactional service announcements (e.g. "we added a new feature") | `noreply@mail.l-gevity.nl` | All enabled members with email, under the existing service relationship | `dispatch-service.yml` — workflow_dispatch only, dry-run by default |
+| `service/` | Transactional service announcements (e.g. "we added a new feature") | `broadcasts@mail.l-gevity.nl` (shared with marketing — see DECISIONS.md for rationale) | All enabled members with email, under the existing service relationship | `dispatch-service.yml` — workflow_dispatch only, dry-run by default |
 
 Service announcements MUST be genuine service-relationship communications,
 not marketing dressed up as service. When in doubt, default to `broadcasts/`
@@ -56,7 +56,7 @@ broadcast, plus `kind: transactional`:
 ---
 subject: 'L-GEVITY: nieuwe nieuwsbrief — opt-in indien gewenst'
 preheader: One-line preview shown next to the subject in inboxes
-from: L-GEVITY <noreply@mail.l-gevity.nl>
+from: L-GEVITY <broadcasts@mail.l-gevity.nl>
 kind: transactional
 ---
 
@@ -84,8 +84,9 @@ gh workflow run dispatch-service.yml --repo l-gevity/broadcasts \
 The dispatcher (`.github/scripts/dispatch_service.py`) fetches the file,
 validates `kind: transactional` in frontmatter (safety guard), queries
 Graph for all enabled members with email, and sends per-recipient (no BCC)
-from `noreply@mail.l-gevity.nl`. Defaults are dry-run; you must pass
-`-f confirm=true` to actually send.
+from `broadcasts@mail.l-gevity.nl` (the same sender as marketing, by
+design — see DECISIONS.md "Single sender for both channels"). Defaults are
+dry-run; you must pass `-f confirm=true` to actually send.
 
 ## Templates
 
