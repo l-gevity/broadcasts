@@ -10,7 +10,12 @@ Workflow-dispatched only. See dispatch-service.yml and README.md.
 Required env (set by dispatch-service.yml):
   DRY_RUN, GRAPH_TOKEN, ACS_TOKEN, EXT_APP_ID, ACS_ENDPOINT,
   SENDER_ADDRESS, SENDER_DISPLAY_NAME, REPLY_TO_ADDRESS,
-  REPO_FULL_NAME, REF, FILE, LIMIT (optional)
+  REPO_FULL_NAME, REF, FILE, LIMIT (optional), RECIPIENTS (optional)
+
+When RECIPIENTS is set (newline- or comma-separated email list), the
+Graph member query is bypassed and only those addresses receive the
+send. Use for warm-up sends, beta cohorts, and tightly-scoped pilots
+where the dispatcher's default of "all enabled members" is too broad.
 
 Frontmatter contract:
   subject:    required
@@ -105,6 +110,7 @@ def main() -> None:
     file_path = env("FILE")
     limit_str = env("LIMIT", required=False, default="")
     limit = int(limit_str) if limit_str else None
+    recipients_override_raw = env("RECIPIENTS", required=False, default="")
 
     print(f"DRY_RUN: {dry_run}")
     print(f"File: {file_path}")
@@ -126,12 +132,29 @@ def main() -> None:
             "with send-broadcast.yml instead."
         )
 
-    print("Fetching ALL CIAM members from Microsoft Graph...")
-    members = fetch_all_members(graph_token, ext_app_id)
-    total_members = len(members)
-    opted_in = sum(1 for m in members if m["opted_in"])
-    print(f"Total members with email: {total_members}")
-    print(f"  of which already opted in to marketing: {opted_in}")
+    if recipients_override_raw.strip():
+        addresses = [
+            line.strip()
+            for line in recipients_override_raw.replace(",", "\n").split("\n")
+            if line.strip() and "@" in line.strip()
+        ]
+        if not addresses:
+            sys.exit("ERROR: RECIPIENTS env was set but contained no valid addresses.")
+        members = [
+            {"oid": "explicit", "address": addr, "opted_in": False}
+            for addr in addresses
+        ]
+        print(
+            f"Explicit recipient list provided — bypassing Graph query. "
+            f"{len(members)} address(es)."
+        )
+    else:
+        print("Fetching ALL CIAM members from Microsoft Graph...")
+        members = fetch_all_members(graph_token, ext_app_id)
+        total_members = len(members)
+        opted_in = sum(1 for m in members if m["opted_in"])
+        print(f"Total members with email: {total_members}")
+        print(f"  of which already opted in to marketing: {opted_in}")
 
     if not members:
         print("No members — nothing to send.")
