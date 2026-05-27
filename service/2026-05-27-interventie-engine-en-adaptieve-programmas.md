@@ -50,9 +50,3 @@ inzicht naar actie net iets makkelijker te maken.
 Veel plezier en gezondheid,  
 **het L-GEVITY-team**  
 <https://l-gevity.nl>
-
----
-
-_Je ontvangt deze e-mail omdat je een L-GEVITY-account hebt. Dit is een
-service-mededeling over een aankomende wijziging in het platform en valt
-onder onze bestaande dienstverlening — geen marketing._

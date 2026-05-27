@@ -51,9 +51,3 @@ Vragen of opmerkingen? Beantwoord deze e-mail.
 
 — L-GEVITY  
 <https://l-gevity.nl>
-
----
-
-_Je ontvangt deze e-mail omdat je een L-GEVITY-account hebt. Dit is een
-eenmalige service-mededeling om onze mail-pijplijn te valideren en valt
-onder onze bestaande dienstverlening — geen marketing._

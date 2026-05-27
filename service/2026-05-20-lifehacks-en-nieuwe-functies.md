@@ -86,9 +86,3 @@ ons weten of de tips raak voelen — beantwoord deze e-mail.
 Veel plezier en gezondheid,  
 **het L-GEVITY-team**  
 <https://l-gevity.nl>
-
----
-
-_Je ontvangt deze e-mail omdat je een L-GEVITY-account hebt. Dit is een
-service-mededeling over een nieuwe functie in het platform en valt onder
-onze bestaande dienstverlening — geen marketing._
