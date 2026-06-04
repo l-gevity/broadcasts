@@ -12,15 +12,16 @@ Newsletter / broadcast content for L-GEVITY members.
   Markdown file.
 - **One file = one send.** A new file added to `broadcasts/*.md` on `main`
   triggers an automatic broadcast. Files in `service/*.md` are dispatched
-  manually via the `dispatch-service.yml` workflow in this repo. Editing a
-  file already on `main` does NOT retrigger anything.
+  manually via `dispatch-service.yml`, or scheduled with `scheduledAt` via
+  `scheduled-service-dispatch.yml`. Editing a file already on `main` does NOT
+  retrigger anything.
 
 ### Two folders, two channels
 
 | Folder | Purpose | Sender | Audience | Trigger |
 | --- | --- | --- | --- | --- |
 | `broadcasts/` | Marketing newsletters — opt-in only | `broadcasts@mail.l-gevity.nl` | Members with `marketingOptInAt` set | `send-broadcast.yml` on push (BCC-batched) |
-| `service/` | Transactional service announcements (e.g. "we added a new feature") | `broadcasts@mail.l-gevity.nl` (shared with marketing — see DECISIONS.md for rationale) | All enabled members with email, under the existing service relationship | `dispatch-service.yml` — workflow_dispatch only, dry-run by default |
+| `service/` | Transactional service announcements (e.g. "we added a new feature") | `broadcasts@mail.l-gevity.nl` (shared with marketing — see DECISIONS.md for rationale) | All enabled members with email, under the existing service relationship | `dispatch-service.yml` manually, or `scheduled-service-dispatch.yml` when `scheduledAt` is due |
 
 Service announcements MUST be genuine service-relationship communications,
 not marketing dressed up as service. When in doubt, default to `broadcasts/`
@@ -58,6 +59,8 @@ subject: 'L-GEVITY: nieuwe nieuwsbrief — opt-in indien gewenst'
 preheader: One-line preview shown next to the subject in inboxes
 from: L-GEVITY <broadcasts@mail.l-gevity.nl>
 kind: transactional
+# Optional scheduled send time. Must include timezone offset.
+# scheduledAt: '2026-06-04T15:00:00+02:00'
 ---
 
 Markdown body. Same conventions as a broadcast — Markdown features, image
@@ -66,7 +69,7 @@ rewriting — but rendered and dispatched by `dispatch-service.yml`, not by
 files under `service/` never trigger an auto-send.
 ```
 
-To send, dispatch the workflow manually from your terminal:
+To send immediately, dispatch the workflow manually from your terminal:
 
 ```bash
 # Pilot to first 5 recipients (dry-run preview comes free without --confirm)
@@ -87,6 +90,26 @@ Graph for all enabled members with email, and sends per-recipient (no BCC)
 from `broadcasts@mail.l-gevity.nl` (the same sender as marketing, by
 design — see DECISIONS.md "Single sender for both channels"). Defaults are
 dry-run; you must pass `-f confirm=true` to actually send.
+
+To schedule a service announcement, add `scheduledAt` frontmatter with an
+ISO-8601 timestamp including timezone. The scheduled dispatcher runs every 15
+minutes and sends due files live. After a successful live send, it commits a
+marker under `.dispatch-log/service/` so later cron runs skip the file.
+
+Dry-run one scheduled file before the due time:
+
+```bash
+gh workflow run scheduled-service-dispatch.yml --repo l-gevity/broadcasts \
+  -f file=service/2026-06-04-dashboard-programmas.md
+```
+
+Force a live scheduled check for one file:
+
+```bash
+gh workflow run scheduled-service-dispatch.yml --repo l-gevity/broadcasts \
+  -f file=service/2026-06-04-dashboard-programmas.md \
+  -f confirm=true
+```
 
 ## Templates
 
@@ -137,6 +160,11 @@ This repo has two send pipelines, each backed by a workflow + script pair:
   `.github/scripts/dispatch_service.py` queries ALL enabled members with
   email, validates `kind: transactional` in the file frontmatter, and
   sends per-recipient.
+- **Scheduled transactional**:
+  `.github/workflows/scheduled-service-dispatch.yml` runs every 15 minutes and
+  scans `service/*.md` for due `scheduledAt` timestamps. It reuses
+  `.github/scripts/dispatch_service.py`, then writes a sent marker under
+  `.dispatch-log/service/` after live success.
 
 Files under `service/` never trigger the marketing workflow (path filter
 on `broadcasts/**/*.md`). Files under `broadcasts/` trip a safety guard

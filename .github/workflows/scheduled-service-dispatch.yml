@@ -1,0 +1,120 @@
+name: Scheduled service dispatch
+
+# Runs due transactional service announcements. Add `scheduledAt` frontmatter
+# to a service/*.md file, using an ISO-8601 timestamp with timezone, e.g.
+# scheduledAt: '2026-06-04T15:00:00+02:00'
+#
+# The workflow writes .dispatch-log/service/*.sent.json after a live success so
+# the 15-minute cron can run idempotently.
+
+on:
+    schedule:
+        - cron: '*/15 * * * *'
+    workflow_dispatch:
+        inputs:
+            file:
+                description: 'Optional: specific service/*.md file to check'
+                required: false
+                type: string
+            confirm:
+                description: 'Set to "true" to actually send. Default is dry-run.'
+                required: false
+                default: 'false'
+                type: string
+            limit:
+                description: 'Optional: cap recipient count for piloting'
+                required: false
+                type: string
+            recipients:
+                description: 'Optional: explicit recipient list for a tightly scoped test'
+                required: false
+                type: string
+
+permissions:
+    contents: write
+    id-token: write
+
+env:
+    CONFIRM: ${{ github.event_name == 'schedule' && 'true' || github.event.inputs.confirm || 'false' }}
+    SCHEDULE_FILE: ${{ github.event.inputs.file || '' }}
+    LIMIT: ${{ github.event.inputs.limit || '' }}
+    RECIPIENTS: ${{ github.event.inputs.recipients || '' }}
+
+jobs:
+    dispatch-due:
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Install dependencies
+              run: pip install --quiet markdown==3.7 pyyaml==6.0.2 jinja2==3.1.4
+
+            - name: Azure Login (federated OIDC, for ACS)
+              uses: azure/login@v2
+              with:
+                  client-id: ${{ secrets.AZURE_CLIENT_ID }}
+                  tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+                  subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+            - name: Acquire Microsoft Graph token (CIAM client credentials)
+              id: graph
+              run: |
+                  RESPONSE=$(curl -s -X POST \
+                    "https://login.microsoftonline.com/${{ secrets.CIAM_TENANT_ID }}/oauth2/v2.0/token" \
+                    -H "Content-Type: application/x-www-form-urlencoded" \
+                    --data-urlencode "client_id=${{ secrets.CIAM_CLIENT_ID }}" \
+                    --data-urlencode "client_secret=${{ secrets.CIAM_CLIENT_SECRET }}" \
+                    --data-urlencode "scope=https://graph.microsoft.com/.default" \
+                    --data-urlencode "grant_type=client_credentials")
+                  TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: Graph token acquisition failed"
+                    echo "$RESPONSE" | jq '.'
+                    exit 1
+                  fi
+                  echo "::add-mask::$TOKEN"
+                  echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+            - name: Acquire ACS access token
+              id: acs
+              run: |
+                  TOKEN=$(az account get-access-token --resource https://communication.azure.com --query accessToken -o tsv)
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: ACS token acquisition failed"
+                    exit 1
+                  fi
+                  echo "::add-mask::$TOKEN"
+                  echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+            - name: Dispatch due service announcements
+              env:
+                  GRAPH_TOKEN: ${{ steps.graph.outputs.token }}
+                  ACS_TOKEN: ${{ steps.acs.outputs.token }}
+                  EXT_APP_ID: ${{ vars.EXT_APP_ID }}
+                  ACS_ENDPOINT: ${{ vars.ACS_ENDPOINT }}
+                  SENDER_ADDRESS: broadcasts@mail.l-gevity.nl
+                  SENDER_DISPLAY_NAME: L-GEVITY
+                  REPLY_TO_ADDRESS: ${{ vars.REPLY_TO_ADDRESS }}
+                  REPO_FULL_NAME: ${{ github.repository }}
+                  REF: ${{ github.ref_name }}
+              run: python .github/scripts/dispatch_scheduled_service.py
+
+            - name: Commit sent markers
+              if: env.CONFIRM == 'true'
+              run: |
+                  if [ -z "$(git status --short .dispatch-log/service)" ]; then
+                    echo "No sent markers to commit."
+                    exit 0
+                  fi
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add .dispatch-log/service
+                  git commit -m "Mark scheduled service dispatch sent"
+                  git push
