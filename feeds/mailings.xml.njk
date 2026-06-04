@@ -1,0 +1,23 @@
+---
+permalink: /feeds/mailings.xml
+layout: false
+eleventyExcludeFromCollections: true
+---
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>{{ site.name | escape }} mailings</title>
+    <link>{{ site.url | escape }}/nieuwsbrief-aanmelden.html</link>
+    <description>Mailing- en nieuwsbriefupdates van {{ site.name | escape }}.</description>
+    <language>nl-NL</language>
+    {% for mailing in collections.mailingAnnouncements | limitItems(30) %}
+    <item>
+      <guid isPermaLink="false">l-gevity-mailing:{{ mailing.inputPath | slugify }}</guid>
+      <title>{{ mailing.data.mailingTitle | escape }}</title>
+      <link>{{ site.url | escape }}{{ mailing.url | escape }}</link>
+      <pubDate>{{ mailing.data.mailingDate | rssDate }}</pubDate>
+      <description>{{ mailing.data.mailingDescription | escape }}</description>
+    </item>
+    {% endfor %}
+  </channel>
+</rss>
