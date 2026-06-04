@@ -5,11 +5,12 @@ name: Scheduled service dispatch
 # scheduledAt: '2026-06-04T15:00:00+02:00'
 #
 # The workflow writes .dispatch-log/service/*.sent.json after a live success so
-# the 15-minute cron can run idempotently.
+# the offset 15-minute cron can run idempotently. GitHub Actions load spikes at
+# the top of the hour, so avoid :00/:15/:30/:45 slots for delivery-critical mail.
 
 on:
     schedule:
-        - cron: '*/15 * * * *'
+        - cron: '7,22,37,52 * * * *'
     workflow_dispatch:
         inputs:
             file:
