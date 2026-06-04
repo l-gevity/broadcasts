@@ -3,6 +3,7 @@ subject: 'Nieuw in je dashboard: persoonlijke programma''s'
 preheader: 'Je dashboard koppelt je metingen nu aan concrete programma''s voor training, herstel, metabolisme, stress en meer.'
 from: L-GEVITY <broadcasts@mail.l-gevity.nl>
 kind: transactional
+scheduledAt: '2026-06-04T20:00:00+02:00'
 ---
 
 Hallo,
