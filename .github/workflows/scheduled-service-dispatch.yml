@@ -26,20 +26,19 @@ on:
                 description: 'Optional: cap recipient count for piloting'
                 required: false
                 type: string
-            recipients:
-                description: 'Optional: explicit recipient list for a tightly scoped test'
-                required: false
-                type: string
 
 permissions:
     contents: write
     id-token: write
 
+concurrency:
+    group: scheduled-service-dispatch-${{ github.ref }}
+    cancel-in-progress: false
+
 env:
     CONFIRM: ${{ github.event_name == 'schedule' && 'true' || github.event.inputs.confirm || 'false' }}
     SCHEDULE_FILE: ${{ github.event.inputs.file || '' }}
     LIMIT: ${{ github.event.inputs.limit || '' }}
-    RECIPIENTS: ${{ github.event.inputs.recipients || '' }}
 
 jobs:
     dispatch-due:
