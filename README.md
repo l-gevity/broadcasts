@@ -10,6 +10,9 @@ Newsletter / broadcast content for L-GEVITY members.
 - **All recipients receive identical content.** No per-user templating beyond
   the unsubscribe footer. Every recipient sees exactly what is in the
   Markdown file.
+- **Workflow inputs never carry raw recipient addresses.** Manual pilots use
+  `limit` against the canonical CIAM recipient query; do not paste email
+  addresses into workflow inputs or public GitHub Actions logs.
 - **One file = one send.** A new file added to `broadcasts/*.md` on `main`
   triggers an automatic broadcast. Files in `service/*.md` are dispatched
   manually via `dispatch-service.yml`, or scheduled with `scheduledAt` via
@@ -72,13 +75,13 @@ files under `service/` never trigger an auto-send.
 To send immediately, dispatch the workflow manually from your terminal:
 
 ```bash
-# Pilot to first 5 recipients (dry-run preview comes free without --confirm)
+# Pilot to first 5 canonical CIAM recipients (dry-run preview comes free without --confirm)
 gh workflow run dispatch-service.yml --repo l-gevity/broadcasts \
   -f file=service/2026-04-29-newsletter-announcement.md \
   -f confirm=true \
   -f limit=5
 
-# Spot-check the pilot in your inbox, then send to everyone:
+# After the pilot is reviewed, send to everyone:
 gh workflow run dispatch-service.yml --repo l-gevity/broadcasts \
   -f file=service/2026-04-29-newsletter-announcement.md \
   -f confirm=true
@@ -89,7 +92,8 @@ validates `kind: transactional` in frontmatter (safety guard), queries
 Graph for all enabled members with email, and sends per-recipient (no BCC)
 from `broadcasts@mail.l-gevity.nl` (the same sender as marketing, by
 design — see DECISIONS.md "Single sender for both channels"). Defaults are
-dry-run; you must pass `-f confirm=true` to actually send.
+dry-run; you must pass `-f confirm=true` to actually send. Dry-run logs show
+counts only, not recipient addresses.
 
 To schedule a service announcement, add `scheduledAt` frontmatter with an
 ISO-8601 timestamp including timezone. The scheduled dispatcher runs every 15
@@ -159,12 +163,17 @@ This repo has two send pipelines, each backed by a workflow + script pair:
   `workflow_dispatch` and is dry-run by default (`confirm: 'false'` input).
   `.github/scripts/dispatch_service.py` queries ALL enabled members with
   email, validates `kind: transactional` in the file frontmatter, and
-  sends per-recipient.
+  sends per-recipient. Manual pilots use the `limit` input; raw recipient
+  addresses are not accepted in workflow inputs.
 - **Scheduled transactional**:
   `.github/workflows/scheduled-service-dispatch.yml` runs every 15 minutes and
   scans `service/*.md` for due `scheduledAt` timestamps. It reuses
   `.github/scripts/dispatch_service.py`, then writes a sent marker under
   `.dispatch-log/service/` after live success.
+
+All send workflows use GitHub Actions `concurrency` with `cancel-in-progress:
+false`, so live sends queue instead of overlapping. This prevents two runs from
+observing the same missing marker/fact state and sending the same mailing twice.
 
 After every live marketing or transactional send, the workflow commits a
 non-PII dispatch fact under `.dispatch-facts/mailings/`. The private
