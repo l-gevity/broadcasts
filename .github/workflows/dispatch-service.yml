@@ -28,14 +28,14 @@ on:
                 description: 'Optional: cap recipient count for piloting (e.g. 5)'
                 required: false
                 type: string
-            recipients:
-                description: 'Optional: explicit recipient list (newline- or comma-separated). When set, bypasses the all-members Graph query.'
-                required: false
-                type: string
 
 permissions:
     contents: write
     id-token: write
+
+concurrency:
+    group: dispatch-service-${{ github.ref }}
+    cancel-in-progress: false
 
 jobs:
     dispatch:
@@ -115,7 +115,6 @@ jobs:
                   REF: ${{ github.ref_name }}
                   FILE: ${{ inputs.file }}
                   LIMIT: ${{ inputs.limit }}
-                  RECIPIENTS: ${{ inputs.recipients }}
               run: python .github/scripts/dispatch_service.py
 
             - name: Commit mailing fact
