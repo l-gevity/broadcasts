@@ -306,11 +306,9 @@ def main() -> None:
 
             sent += len(batch)
             if dry_run:
-                sample = ", ".join(r["address"] for r in batch[:3])
-                more = "" if len(batch) <= 3 else f" (+{len(batch) - 3} more)"
                 print(
-                    f"  [DRY] would send batch {sent - len(batch) + 1}-{sent}/{total}: "
-                    f"{sample}{more}"
+                    f"  [DRY] would send batch {sent - len(batch) + 1}-{sent}/{total} "
+                    f"({len(batch)} recipients)"
                 )
                 continue
             op_id = send_one(acs_token, acs_endpoint, payload)
