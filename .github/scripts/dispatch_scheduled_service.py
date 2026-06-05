@@ -95,8 +95,6 @@ def dispatch(path: Path) -> None:
     child_env["DRY_RUN"] = "false" if env("CONFIRM").lower() == "true" else "true"
     if env("LIMIT"):
         child_env["LIMIT"] = env("LIMIT")
-    if env("RECIPIENTS"):
-        child_env["RECIPIENTS"] = env("RECIPIENTS")
     subprocess.run(
         [sys.executable, ".github/scripts/dispatch_service.py"],
         env=child_env,
