@@ -25,6 +25,10 @@ permissions:
     contents: write
     id-token: write
 
+concurrency:
+    group: send-broadcast-${{ github.ref }}
+    cancel-in-progress: false
+
 env:
     DRY_RUN: 'false'
 
