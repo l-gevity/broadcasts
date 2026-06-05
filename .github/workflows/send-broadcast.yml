@@ -22,7 +22,7 @@ on:
                 type: string
 
 permissions:
-    contents: read
+    contents: write
     id-token: write
 
 env:
@@ -144,6 +144,19 @@ jobs:
                   REF: ${{ github.ref_name }}
                   FILES: ${{ steps.detect.outputs.files }}
               run: python .github/scripts/send_broadcast.py
+
+            - name: Commit mailing facts
+              if: steps.detect.outputs.files != ''
+              run: |
+                  if [ -z "$(git status --short .dispatch-facts/mailings)" ]; then
+                    echo "No mailing facts to commit."
+                    exit 0
+                  fi
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add .dispatch-facts/mailings
+                  git commit -m "Record mailing dispatch facts"
+                  git push
 
             - name: Summary
               if: always() && steps.detect.outputs.files != ''

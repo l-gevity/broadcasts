@@ -43,6 +43,8 @@ from send_broadcast import (  # noqa: E402
     parse_broadcast,
     rewrite_images,
     send_one,
+    utc_now_iso,
+    write_delivery_report_fact,
 )
 
 GRAPH_USERS_BATCH_SIZE = 999
@@ -176,6 +178,7 @@ def main() -> None:
     sent = 0
     failed = 0
     total = len(recipients)
+    started_at = utc_now_iso()
     for i, recipient in enumerate(recipients, start=1):
         payload = {
             "senderAddress": sender_address,
@@ -209,6 +212,14 @@ def main() -> None:
         print(html[:600])
     if failed > 0:
         sys.exit(1)
+    if not dry_run and sent > 0:
+        write_delivery_report_fact(
+            kind="service",
+            source_file=path.as_posix(),
+            sent_count=sent,
+            started_at=started_at,
+            ended_at=utc_now_iso(),
+        )
 
 
 if __name__ == "__main__":

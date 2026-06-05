@@ -18,10 +18,10 @@ Newsletter / broadcast content for L-GEVITY members.
 
 ### Two folders, two channels
 
-| Folder | Purpose | Sender | Audience | Trigger |
-| --- | --- | --- | --- | --- |
-| `broadcasts/` | Marketing newsletters — opt-in only | `broadcasts@mail.l-gevity.nl` | Members with `marketingOptInAt` set | `send-broadcast.yml` on push (BCC-batched) |
-| `service/` | Transactional service announcements (e.g. "we added a new feature") | `broadcasts@mail.l-gevity.nl` (shared with marketing — see DECISIONS.md for rationale) | All enabled members with email, under the existing service relationship | `dispatch-service.yml` manually, or `scheduled-service-dispatch.yml` when `scheduledAt` is due |
+| Folder        | Purpose                                                             | Sender                                                                                 | Audience                                                                | Trigger                                                                                        |
+| ------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `broadcasts/` | Marketing newsletters — opt-in only                                 | `broadcasts@mail.l-gevity.nl`                                                          | Members with `marketingOptInAt` set                                     | `send-broadcast.yml` on push (BCC-batched)                                                     |
+| `service/`    | Transactional service announcements (e.g. "we added a new feature") | `broadcasts@mail.l-gevity.nl` (shared with marketing — see DECISIONS.md for rationale) | All enabled members with email, under the existing service relationship | `dispatch-service.yml` manually, or `scheduled-service-dispatch.yml` when `scheduledAt` is due |
 
 Service announcements MUST be genuine service-relationship communications,
 not marketing dressed up as service. When in doubt, default to `broadcasts/`
@@ -55,7 +55,7 @@ broadcast, plus `kind: transactional`:
 
 ```markdown
 ---
-subject: 'L-GEVITY: nieuwe nieuwsbrief — opt-in indien gewenst'
+subject: "L-GEVITY: nieuwe nieuwsbrief — opt-in indien gewenst"
 preheader: One-line preview shown next to the subject in inboxes
 from: L-GEVITY <broadcasts@mail.l-gevity.nl>
 kind: transactional
@@ -165,6 +165,11 @@ This repo has two send pipelines, each backed by a workflow + script pair:
   scans `service/*.md` for due `scheduledAt` timestamps. It reuses
   `.github/scripts/dispatch_service.py`, then writes a sent marker under
   `.dispatch-log/service/` after live success.
+
+After every live marketing or transactional send, the workflow commits a
+non-PII dispatch fact under `.dispatch-facts/mailings/`. The private
+`l-gevity/ops-reports` reporting workflow ingests those facts and writes the
+delivery report; this public repo never stores private report contents.
 
 Files under `service/` never trigger the marketing workflow (path filter
 on `broadcasts/**/*.md`). Files under `broadcasts/` trip a safety guard

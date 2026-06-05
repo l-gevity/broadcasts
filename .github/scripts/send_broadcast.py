@@ -24,6 +24,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 
 import markdown as md
@@ -43,6 +44,7 @@ SEND_PAUSE_SECONDS = 0.5
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = REPO_ROOT / "templates"
+MAILING_FACTS_DIR = REPO_ROOT / ".dispatch-facts" / "mailings"
 
 # `body` and `unsubscribe_url` are the rendering context's reserved keys —
 # frontmatter cannot override them.
@@ -71,6 +73,10 @@ def env(name: str, *, required: bool = True, default: str = "") -> str:
     if required and not val:
         sys.exit(f"ERROR: required env var {name} is not set")
     return val
+
+
+def utc_now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def parse_broadcast(path: Path) -> tuple[dict, str]:
@@ -194,6 +200,42 @@ def send_one(
     raise RuntimeError("ACS send: exhausted retries")
 
 
+def _safe_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9._-]+", "-", value.lower()).strip("-")
+    return slug or "mailing"
+
+
+def write_delivery_report_fact(
+    *,
+    kind: str,
+    source_file: str,
+    sent_count: int,
+    started_at: str,
+    ended_at: str,
+) -> Path:
+    """Emit a public, non-PII fact for the private ops reporter to ingest."""
+    slug = _safe_slug(Path(source_file).stem)
+    year, month = started_at[:4], started_at[5:7]
+    run_id = env("GITHUB_RUN_ID", required=False, default="local")
+    path = MAILING_FACTS_DIR / kind / year / month / f"{slug}.{run_id}.json"
+    payload = {
+        "schema": "l-gevity.broadcasts.mailing-fact.v1",
+        "mailKind": kind,
+        "sourceFilePath": source_file,
+        "workflowRunId": run_id,
+        "submittedCount": sent_count,
+        "sendWindow": {
+            "startedAt": started_at,
+            "endedAt": ended_at,
+        },
+        "createdAt": utc_now_iso(),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"Delivery report fact written: {path.relative_to(REPO_ROOT).as_posix()}")
+    return path
+
+
 def chunked(seq: list, size: int):
     """Yield successive `size`-sized chunks from `seq`."""
     for i in range(0, len(seq), size):
@@ -242,6 +284,7 @@ def main() -> None:
 
         total = len(recipients)
         sent = 0
+        started_at = utc_now_iso()
         for batch in chunked(recipients, BCC_BATCH_SIZE):
             # NB: ACS Email rejects most reserved headers (incl. List-Unsubscribe
             # / RFC 8058 one-click headers) with HTTP 400 "Request body validation
@@ -280,6 +323,14 @@ def main() -> None:
         if dry_run:
             print("\n  [DRY] HTML preview (first 600 chars):")
             print("  " + html[:600].replace("\n", "\n  "))
+        elif sent > 0:
+            write_delivery_report_fact(
+                kind="marketing",
+                source_file=path.as_posix(),
+                sent_count=sent,
+                started_at=started_at,
+                ended_at=utc_now_iso(),
+            )
 
 
 if __name__ == "__main__":

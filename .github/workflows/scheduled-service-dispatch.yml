@@ -110,12 +110,12 @@ jobs:
             - name: Commit sent markers
               if: env.CONFIRM == 'true'
               run: |
-                  if [ -z "$(git status --short .dispatch-log/service)" ]; then
-                    echo "No sent markers to commit."
+                  if [ -z "$(git status --short .dispatch-log/service .dispatch-facts/mailings)" ]; then
+                    echo "No sent markers or mailing facts to commit."
                     exit 0
                   fi
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git add .dispatch-log/service
+                  git add .dispatch-log/service .dispatch-facts/mailings
                   git commit -m "Mark scheduled service dispatch sent"
                   git push
