@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-06-07T16:02:45Z",
+  "mailKind": "service",
+  "schema": "l-gevity.broadcasts.mailing-fact.v1",
+  "sendWindow": {
+    "endedAt": "2026-06-07T16:02:45Z",
+    "startedAt": "2026-06-07T15:58:43Z"
+  },
+  "sourceFilePath": "service/2026-06-07-bloedtest-rapportage-compleet.md",
+  "submittedCount": 145,
+  "workflowRunId": "27097516937"
+}
