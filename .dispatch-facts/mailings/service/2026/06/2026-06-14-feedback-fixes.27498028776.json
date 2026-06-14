@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-06-14T11:59:28Z",
+  "mailKind": "service",
+  "schema": "l-gevity.broadcasts.mailing-fact.v1",
+  "sendWindow": {
+    "endedAt": "2026-06-14T11:59:28Z",
+    "startedAt": "2026-06-14T11:55:18Z"
+  },
+  "sourceFilePath": "service/2026-06-14-feedback-fixes.md",
+  "submittedCount": 148,
+  "workflowRunId": "27498028776"
+}
