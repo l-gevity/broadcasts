@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-07-01T19:03:32Z",
+  "mailKind": "service",
+  "schema": "l-gevity.broadcasts.mailing-fact.v1",
+  "sendWindow": {
+    "endedAt": "2026-07-01T19:03:32Z",
+    "startedAt": "2026-07-01T18:59:06Z"
+  },
+  "sourceFilePath": "service/2026-07-01-biometrische-engine-api.md",
+  "submittedCount": 153,
+  "workflowRunId": "28540781968"
+}
