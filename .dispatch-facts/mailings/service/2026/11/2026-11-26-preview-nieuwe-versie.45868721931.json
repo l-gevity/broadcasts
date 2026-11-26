@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-11-26T17:38:49Z",
+  "mailKind": "service",
+  "schema": "l-gevity.broadcasts.mailing-fact.v1",
+  "sendWindow": {
+    "endedAt": "2026-11-26T17:38:49Z",
+    "startedAt": "2026-11-26T17:33:44Z"
+  },
+  "sourceFilePath": "service/2026-11-26-preview-nieuwe-versie.md",
+  "submittedCount": 178,
+  "workflowRunId": "45868721931"
+}
